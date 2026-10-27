@@ -46,7 +46,10 @@ import cpw.mods.fml.common.gameevent.TickEvent;
 public final class CompatProbe {
 
     private static final int TICKS = 1200;
-    private static final int CONTROL_Y = 120;
+    /** Control height for entities and multiblocks: underground above Y 0, like the tile entity cells. */
+    private static final int CONTROL_Y = 30;
+    /** Isolated recheck: one cell per item, this far apart, a single level. */
+    private static final int RECHECK_SPACING = 20, RECHECK_COLS = 9;
     private static final String SNAPSHOT = "akashicbellow-compat.dat";
 
     private final WorldServer world;
@@ -110,6 +113,18 @@ public final class CompatProbe {
             probe.finish(server, "akashicbellow-compatverify.txt");
             return;
         }
+        if (phase.equals("compatrecheck")) {
+            // Every item the full probe flagged, alone in a fresh world: rules out interference between cells.
+            probe.only = readFlagged(new File("akashicbellow-recheck-input.txt"));
+            probe.report = "akashicbellow-compatrecheck.txt";
+            probe.out.add("INFO isolated recheck of " + probe.only.size() + " flagged items");
+            probe.place();
+            probe.entities();
+            FMLCommonHandler.instance()
+                .bus()
+                .register(probe);
+            return;
+        }
         probe.place();
         probe.entities();
         probe.multiblocks();
@@ -121,6 +136,36 @@ public final class CompatProbe {
         FMLCommonHandler.instance()
             .bus()
             .register(probe);
+    }
+
+    /** Recheck mode: names to test (tiles as {@code id:meta}, entities by name); null for the full probe. */
+    private Set<String> only;
+    private String report = "akashicbellow-compat.txt";
+    private int recheckCell;
+
+    /** Tile and entity names from the FINDING and RANDOM lines of a previous report. */
+    private static Set<String> readFlagged(File file) {
+        Set<String> names = new java.util.LinkedHashSet<>();
+        try {
+            for (String line : Files.readAllLines(file.toPath(), StandardCharsets.UTF_8)) {
+                if (line.startsWith("FINDING tile ") || line.startsWith("RANDOM tile ")) {
+                    String rest = line.substring(line.indexOf("tile ") + 5);
+                    names.add(rest.split(" ")[0]);
+                } else if (line.startsWith("FINDING entity ") && line.contains(" deep")) {
+                    names.add(line.substring("FINDING entity ".length(), line.indexOf(" deep")));
+                }
+            }
+        } catch (Exception e) {
+            AkashicBellow.LOG.error("Cannot read recheck input", e);
+        }
+        return names;
+    }
+
+    /** x, z of the next isolated cell. */
+    private int[] nextRecheckCell() {
+        int c = this.recheckCell++;
+        return new int[] { this.ox + 4 + (c % RECHECK_COLS) * RECHECK_SPACING,
+            this.oz + 4 + (c / RECHECK_COLS) * RECHECK_SPACING };
     }
 
     private void finding(String what) {
@@ -147,11 +192,17 @@ public final class CompatProbe {
                     has = false;
                 }
                 if (!has) continue;
+                if (this.only != null && !this.only.contains(id + ":" + meta)) continue;
                 int cell = i % LEVEL, level = i / LEVEL;
                 int x = this.ox + (cell % COLS) * 4, z = this.oz + (cell / COLS) * 4;
+                if (this.only != null) {
+                    int[] xz = this.nextRecheckCell();
+                    x = xz[0];
+                    z = xz[1];
+                    level = 0;
+                }
                 // Control: an ordinary underground base above Y 0. A control at the top of the column is hit by
-                // everything
-                // that targets the surface (meteors, flux, lightning, snow) and the deep cells never are.
+                // everything that targets the surface (meteors, flux, lightning, snow); the deep cells never are.
                 int dy = floor + 8 + level * 4, cy = 8 + level * 4;
                 if (dy > -4) {
                     this.finding("probe ran out of room for tile entity " + id + ":" + meta);
@@ -308,7 +359,13 @@ public final class CompatProbe {
                 // Registered with tracking frequency 0: only ever exists in flight (Witchery brews); the vanilla
                 // tracker divides by it.
                 || !trackable(c)) continue;
+            if (this.only != null && !this.only.contains(e.getKey())) continue;
             int x = this.ox + 2 + (i % 32) * 6, z = z0 + 2 + (i / 32) * 6;
+            if (this.only != null) {
+                int[] xz = this.nextRecheckCell();
+                x = xz[0];
+                z = xz[1];
+            }
             Entity deep = this.spawnBoxed(e.getKey(), x, this.deepY, z);
             Entity control = this.spawnBoxed(e.getKey(), x, CONTROL_Y, z);
             i++;
@@ -508,7 +565,7 @@ public final class CompatProbe {
             .unregister(this);
         this.afterTicks();
         if (this.mechanics != null) this.findings += this.mechanics.report(this.out);
-        this.finish(MinecraftServer.getServer(), "akashicbellow-compat.txt");
+        this.finish(MinecraftServer.getServer(), this.report);
     }
 
     private void afterTicks() {
@@ -716,7 +773,14 @@ public final class CompatProbe {
             int x = e.getInteger("X"), z = e.getInteger("Z");
             TileEntity deep = this.world.getTileEntity(x, e.getInteger("DY"), z);
             if (deep == null) {
-                failures.put(e.getString("Name"), "missing after reload");
+                TileEntity control = this.tileOrNull(x, e.getInteger("CY"), z);
+                this.lastError = null;
+                String where = " deep block now " + this.blockAt(x, e.getInteger("DY"), z)
+                    + ", control "
+                    + (control == null ? "missing too (" + this.blockAt(x, e.getInteger("CY"), z) + ")" : "present");
+                if (control == null)
+                    this.out.add("INFO tile " + e.getString("Name") + " missing after reload at both heights:" + where);
+                else failures.put(e.getString("Name"), "missing after reload;" + where);
                 continue;
             }
             Set<String> deepChanged = changedKeys(e.getCompoundTag("Deep"), positionless(deep));

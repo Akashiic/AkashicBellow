@@ -58,8 +58,30 @@ public final class BukkitProbe {
         int light = (Byte) above.getClass()
             .getMethod("getLightFromBlocks")
             .invoke(getBlockAt.invoke(bworld, x, -8, z));
-        int nms = world.getSavedLightValue(net.minecraft.world.EnumSkyBlock.Block, x, -8, z);
-        out.check("bukkit block light below 0", light >= 14 && light == nms, "bukkit=" + light + " world=" + nms);
+        net.minecraft.world.EnumSkyBlock B = net.minecraft.world.EnumSkyBlock.Block;
+        int nms = world.getSavedLightValue(B, x, -8, z);
+        // Diagnostics: light at the source, after a forced update, and with the opposite placement order.
+        int atSource = world.getSavedLightValue(B, x, -9, z);
+        boolean updated = world.updateLightByType(B, x, -8, z);
+        int forced = world.getSavedLightValue(B, x, -8, z);
+        world.setBlock(x + 2, -8, z, Blocks.air, 0, 3);
+        world.setBlock(x + 2, -9, z, Blocks.glowstone, 0, 3);
+        int reversed = world.getSavedLightValue(B, x + 2, -8, z);
+        world.setBlockToAir(x + 2, -9, z);
+        out.check(
+            "bukkit block light below 0",
+            light >= 14 && light == nms,
+            "bukkit=" + light
+                + " world="
+                + nms
+                + " source="
+                + atSource
+                + " forcedUpdate="
+                + updated
+                + "->"
+                + forced
+                + " airFirst="
+                + reversed);
 
         Block before245 = world.getBlock(x, 245, z);
         above.getClass()

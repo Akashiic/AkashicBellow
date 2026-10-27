@@ -37,3 +37,4 @@ rc=$?
 echo "crucible $phase rc=$rc"
 grep -ahE "^(FAIL|FINDING|RESULT|SKIP)" akashicbellow-*.txt 2>/dev/null
 ls crash-reports 2>/dev/null
+exit "$rc"

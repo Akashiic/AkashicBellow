@@ -70,6 +70,7 @@ public final class SelfTest {
                 this.ores(minY);
                 if (com.akashiic.bellow.core.Compat.crucible) {
                     com.akashiic.bellow.selftest.BukkitProbe.run((WorldServer) this.world, this::check);
+                    com.akashiic.bellow.selftest.PluginProbe.run((WorldServer) this.world, this::check);
                 }
             }
         } catch (Throwable t) {

@@ -188,14 +188,51 @@ em Y ≥ 0), entidades e geradores de dimensões espaciais (sem camada profunda)
 ### 9.1 Plugins Bukkit (servidor de produção)
 
 O Crucible carrega as classes de plugin fora dos transformers do Forge: mixins não as alcançam (o
-`AkashicWorldEditEndlessIDsCompat` do pack reescreve o jar do WorldEdit justamente por isso). As saídas são um Java
-agent ou o patch do jar.
+`AkashicWorldEditEndlessIDsCompat` do pack reescreve o jar do WorldEdit justamente por isso). O Bellow usa um Java
+agent, que não altera nenhum arquivo do servidor.
 
 | plugin | situação abaixo de 0 | caminho |
 |---|---|---|
-| GriefPreventionPlus 13.9 | claims 2D com profundidade mínima global `GriefPrevention.Claims.MaximumDepth`, que está em 0: nada abaixo de 0 é protegido | configuração (`-64`) |
-| WorldEdit 6.1.9 | `CuboidRegion` limita seleções a `clampY(0, maxY)`; `EditSession` recusa Y < 0 e usa `BoundedHeightMask(0, …)` | patch do plugin |
-| WorldGuard 6.2 | regiões nascem das seleções do WorldEdit (Y ≥ 0); regiões existentes começam em 0 | patch do WorldEdit + migração das regiões que vão do 0 ao topo |
+| GriefPreventionPlus 13.9 | claims 2D cortados na profundidade global `GriefPrevention.Claims.MaximumDepth` (0 no pack): nada abaixo de 0 é protegido. Os três usos do valor (proteção, baú do auto-claim, pontuação de investimento) só leem a configuração | configuração: `MaximumDepth: -64` (o piso) |
+| WorldEdit 6.1.9 | seleções limitadas a Y ≥ 0, `EditSession` recusa Y < 0, máscaras e navegação param em 0 | agent `AkashicBellow-WorldEdit-6.1.9-*-agent.jar` |
+| WorldGuard 6.2 | as consultas usam o Y real (correto com o Y corrigido do CraftBukkit); regiões novas vêm das seleções do WorldEdit; as existentes que vão de 0 ao topo não cobrem a camada nova | agent do WorldEdit + `tools/wgdeep.py` para listar as regiões a estender |
+
+**Agent do WorldEdit** (`agent/`, build separado: `./gradlew -p agent build`). Entra na linha de comando como os
+outros agents do pack (`-javaagent:AkashicBellow-WorldEdit-6.1.9-<versão>-agent.jar`).
+
+* **Contrato com o mod**: no Crucible, o Bellow publica o piso de cada mundo como a propriedade de sistema
+  `akashicbellow.floor.<nome do mundo Bukkit>` (em `WorldEvent.Load`). O código injetado lê só essa propriedade
+  (`Integer.getInteger`), sem tocar em classes do mod, que o class loader do plugin não enxerga. Sem o mod, ou num
+  mundo sem camada profunda, a propriedade não existe e o WorldEdit mantém o piso 0.
+* **Tudo ou nada**: quando a primeira classe-alvo é definida, o agent calcula o SHA-256 de todas as 11 classes-alvo
+  dentro do jar de onde ela veio. Se qualquer uma diferir do WorldEdit 6.1.9, nenhuma é alterada (um WorldEdit meio
+  corrigido selecionaria abaixo de 0 e depois recusaria editar ali). O patch do AkashicWE-EID só reescreve
+  `BaseBlock`, que não é alvo, então os hashes valem para o jar já corrigido por ele.
+* **Classes já transformadas**: no Crucible, o class loader de plugins roda o remapeador SpecialSource
+  (`remap-guava: true` no `cauldron.yml` troca `com/google/common` por `guava10/com/google/common`) antes dos agents,
+  então os bytes que chegam ao agent não têm o hash do jar (medido: todas as classes carregadas; o código é idêntico
+  ao do jar fora o nome do Guava e a ordem dos atributos). A identidade fica com o jar verificado; em cada classe, cada ponto
+  ainda precisa casar exatamente, com a contagem esperada. O log diz `already transformed upstream` nesses casos, e
+  `-Dakashicbellow.we.dump=<dir>` grava os bytes recebidos para diagnóstico.
+* **Edições**: cada ponto é um padrão exato de instruções com contagem esperada; qualquer divergência rejeita a classe
+  e mantém o bytecode original. As edições só trocam a constante 0 (ou 1) pelo piso, ou comparam com o piso em vez de
+  com 0, sem novos desvios, de modo que os stack map frames continuam válidos. Pontos alterados:
+  `DataValidatorExtent` (todo bloco escrito; piso lido uma vez por `EditSession`), `CuboidRegion` e
+  `Polygonal2DRegion` (limites da seleção), `AbstractWorld.getMinimumPoint` (cilindro e esfera),
+  `Polygonal2DSelection`/`CylinderSelection` (API Bukkit usada por outros plugins), `//chunk`, `//expand vert`,
+  `//removebelow`, `//fill`, `//drain`, `//fixwater`/`//fixlava`, `//cyl`, o traço de mira (`/jumpto`, ferramentas)
+  e a navegação (`/ascend`, `/descend`, `/ceil`, `/up`, `/unstuck`).
+* **Fora do escopo, de propósito**: `//regen` (copia Y 0..255), restauração de snapshots (seções Anvil 0..15) e os
+  laços de neve/grama/degelo, que descem a partir da superfície.
+* **Testes**: `./gradlew -p agent test -Pbellow.weJar=<jar do WorldEdit> -Pbellow.serverJar=<server.jar>` aplica
+  o patch às 11 classes com a contagem de pontos esperada (também depois do remapeamento do Guava do Crucible), sobe
+  uma JVM com o agent para linkar todas
+  (verificador de bytecode da JVM) e conferir seleção e validação no piso e abaixo dele, e confere que um jar com
+  uma única classe diferente fica intocado.
+
+**GriefPreventionPlus com `CreationRequiresWorldGuardBuildPermission: true`** (desligado no pack): o teste de
+sobreposição com o WorldGuard monta uma região de Y 0 ao topo, então não enxerga uma região do WorldGuard que fique
+inteira abaixo de 0. Não afeta a proteção dos claims.
 
 ## 10. Testes
 
@@ -241,6 +278,12 @@ agent ou o patch do jar.
   * Num mundo **novo**, os primeiros chunks são gerados dentro do construtor do `World`, antes de o CraftBukkit
     registrar os vizinhos; o `updateLightByType` do Crucible (vindo do PaperSpigot) recusa toda atualização de luz
     neles, em qualquer altura (medido também acima do solo). Mundos existentes carregam o spawn pelo caminho normal.
+* **Plugins abaixo de 0** (mesmo servidor, com o agent do WorldEdit como terceiro agent e, só na cópia de teste,
+  `MaximumDepth: -64` no GriefPreventionPlus): self-test PASS. O piso chega aos plugins (`akashicbellow.floor.world=-64`);
+  o WorldEdit seleciona até −64 (não 0), um `EditSession` preenche 3×11×3 = 99 blocos de −64 a −54 e recusa −65; uma
+  região do WorldGuard em −62..−44 é encontrada por consulta dentro dela e não acima; um claim do GriefPreventionPlus é
+  achado na superfície e em Y −59. Todas as 7 classes-alvo carregadas na sessão chegaram ao agent já remapeadas pelo
+  Crucible (§9.1) e foram corrigidas com a contagem exata de pontos.
 * **Custo** (`-Dakashicbellow.selftest.phase=bench`): 529 chunks novos, servidor de produção com EndlessIDs:
 
   | | sem camada | −64 | −512 |
@@ -255,9 +298,10 @@ agent ou o patch do jar.
 
 ## 11. Riscos abertos (beta)
 
-* Crucible: o servidor de produção foi testado (§10), sem jogadores reais conectados. O comportamento de plugins com
-  blocos abaixo de 0 depende do §9.1: até o patch do WorldEdit e o ajuste do GriefPreventionPlus, bases no fundo não
-  são protegidas por WorldGuard nem por claims.
+* Crucible: o servidor de produção foi testado (§10), sem jogadores reais conectados; os plugins foram exercitados
+  pelas suas APIs, não por comandos de jogador. Proteção abaixo de 0 exige o agent do WorldEdit na linha de comando,
+  `MaximumDepth` no piso no GriefPreventionPlus e as regiões antigas do WorldGuard estendidas (§9.1).
+  `//regen` e restauração de snapshots continuam limitados a Y ≥ 0.
 * Memória (medida, §10): −64 custa +40 KB por chunk carregado (+46%); −512 custa +351 KB (5×). Com distância de
   visão 10 (441 chunks por jogador isolado) são ≈ +18 MB por jogador em −64 e ≈ +150 MB em −512, no servidor e no
   cliente. Recomendado: −64 (padrão) a −128; −512 só com RAM sobrando e poucos jogadores espalhados.

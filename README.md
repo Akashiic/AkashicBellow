@@ -27,12 +27,26 @@ O desenho, as decisões e o motivo de não usar CubicChunks estão em [docs/DESI
 | ChunkAPI | 0.8.4+ (obrigatório) |
 
 Servidores: Forge e **Crucible** (testado com o build de produção 1.7.10-staging-67b53034; o Bellow corrige o Y que o
-CraftBukkit entregava aos plugins). Para proteger bases abaixo de 0 com plugins, veja `docs/DESIGN.md` §9.1.
+CraftBukkit entregava aos plugins). Para WorldEdit, WorldGuard e GriefPreventionPlus abaixo de 0, veja a seção
+"Plugins no Crucible" abaixo.
 
 Opcionais com integração: Et Futurum Requiem, EndlessIDs, ArchaicFix (Phosphor), Hodgepodge, Angelica,
 IndustrialCraft 2 (Minerador e Magnetizador alcançam a camada profunda) e Galacticraft (foguetes não são destruídos
 abaixo de Y 0). Testado no servidor com IC2, Immersive Engineering e Galacticraft: veja `docs/DESIGN.md` §9–§10.
 O mod é obrigatório **no servidor e no cliente**.
+
+## Plugins no Crucible (WorldEdit, WorldGuard, GriefPreventionPlus)
+
+* **WorldEdit 6.1.9**: adicione o agent à linha de comando do servidor, junto dos outros agents
+  (`-javaagent:AkashicBellow-WorldEdit-6.1.9-<versão>-agent.jar`; build: `./gradlew -p agent build`). Ele só altera o
+  WorldEdit 6.1.9 exato (SHA-256 de cada classe) e não toca em nenhum arquivo; no log aparece
+  `[AkashicBellow-WE] WorldEdit 6.1.9 verified`. Sem ele, seleções e edições param em Y 0.
+* **GriefPreventionPlus**: `GriefPrevention.Claims.MaximumDepth: -64` (o piso) em `GriefPreventionData/config.yml`;
+  com 0 os claims não protegem nada abaixo de Y 0.
+* **WorldGuard**: regiões antigas que vão de 0 ao topo não cobrem a camada nova. `tools/wgdeep.py <servidor>` lista
+  essas regiões (só leitura) com os comandos para estendê-las (`//pos1`, `//pos2`, `/rg redefine`).
+
+Detalhes em `docs/DESIGN.md` §9.1.
 
 ## Configuração (`config/akashicbellow.cfg`)
 
@@ -71,6 +85,9 @@ tools/selftest.sh -Pbellow.compatRun=true          # idem com EFR + EndlessIDs +
 tools/clienttest.sh                                # cliente headless (xvfb), renderer vanilla
 tools/clienttest.sh -Pbellow.compatRun=true -Pbellow.angelica=true   # cliente com Angelica
 tools/crucibletest.sh <cópia do servidor> [fase]   # Crucible real (server.jar, mods, plugins, agents)
+./gradlew -p agent build             # agent do WorldEdit em agent/build/libs
+./gradlew -p agent test -Pbellow.weJar=<worldedit-bukkit-6.1.9.jar> -Pbellow.serverJar=<server.jar do Crucible>
+tools/wgdeep.py <servidor> [--world world] [--floor -64]   # regiões do WorldGuard que param em Y 0 (só leitura)
 ```
 
 Num servidor com os mods do pack (jar reobfuscado em `mods/`), adicione

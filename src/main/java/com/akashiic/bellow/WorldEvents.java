@@ -4,6 +4,7 @@ import net.minecraft.world.World;
 import net.minecraftforge.event.world.WorldEvent;
 
 import com.akashiic.bellow.compat.archaic.DeepLightingInstaller;
+import com.akashiic.bellow.compat.bukkit.BukkitFloors;
 import com.akashiic.bellow.core.Compat;
 
 import cpw.mods.fml.common.eventhandler.EventPriority;
@@ -14,11 +15,13 @@ public final class WorldEvents {
 
     /**
      * Server worlds get the deep Phosphor engine as soon as they exist (before the spawn area is loaded). Client worlds
-     * get it when the server announces their floor.
+     * get it when the server announces their floor. On Crucible the floor is also published for Bukkit plugins.
      */
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public void onWorldLoad(WorldEvent.Load event) {
         World world = event.world;
-        if (Compat.phosphor && !world.isRemote) DeepLightingInstaller.install(world);
+        if (world.isRemote) return;
+        if (Compat.phosphor) DeepLightingInstaller.install(world);
+        if (Compat.crucible) BukkitFloors.publish(world);
     }
 }

@@ -76,7 +76,7 @@ public final class BukkitProbe {
         for (int y : new int[] { -11, -10, -9, -8, 246 }) world.setBlockToAir(x, y, z);
     }
 
-    private static Object bukkitWorld(WorldServer world) throws ReflectiveOperationException {
+    static Object bukkitWorld(WorldServer world) throws ReflectiveOperationException {
         for (Object w : (List<?>) Class.forName("org.bukkit.Bukkit")
             .getMethod("getWorlds")
             .invoke(null)) {

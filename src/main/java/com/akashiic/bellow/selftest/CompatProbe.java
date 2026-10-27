@@ -137,7 +137,7 @@ public final class CompatProbe {
         for (Object o : Block.blockRegistry) {
             Block block = (Block) o;
             String id = Block.blockRegistry.getNameForObject(block);
-            for (int meta = 0; meta < 16; meta++) {
+            for (int meta : obtainableMetas(block)) {
                 boolean has;
                 try {
                     has = block.hasTileEntity(meta);
@@ -189,6 +189,29 @@ public final class CompatProbe {
     }
 
     private String lastError;
+
+    /**
+     * Metas a player can actually hold: 0, plus, for items with subtypes, each meta whose item names itself without
+     * failing and differently from the lower ones. Mods often declare tile entities for all 16 metas and crash on
+     * the ones that do not exist in the game (MFR machines, ElectriCraft wires); rotation metas are the same tile
+     * entity and add nothing.
+     */
+    private static List<Integer> obtainableMetas(Block block) {
+        List<Integer> metas = new ArrayList<>();
+        metas.add(0);
+        net.minecraft.item.Item item = net.minecraft.item.Item.getItemFromBlock(block);
+        if (item == null || !item.getHasSubtypes()) return metas;
+        Set<String> names = new java.util.HashSet<>();
+        for (int meta = 0; meta < 16; meta++) {
+            try {
+                String name = item.getUnlocalizedName(new ItemStack(item, 1, meta));
+                if (name != null && names.add(name) && meta > 0) metas.add(meta);
+            } catch (Throwable ignored) {
+                // not a real variant
+            }
+        }
+        return metas;
+    }
 
     private String takeError() {
         String e = this.lastError;

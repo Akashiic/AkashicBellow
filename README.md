@@ -75,6 +75,13 @@ Comandos (op): `/bellow info`, `/bellow stats [raio]`, `/bellow selftest`.
 
 Desinstalar: o mundo continua abrindo, mas tudo abaixo de Y 0 é perdido.
 
+## Downloads (GitHub Actions)
+
+Cada push no `main` roda o workflow **Build**, que gera do mesmo commit o mod e o agent do WorldEdit (companion) e
+publica os dois como artifacts do mesmo run, sem zip: `AkashicBellow-<versão>.jar` e
+`AkashicBellow-WorldEdit-6.1.9-<versão>-agent.jar`, com `<versão>` = `0.1.0-beta.1-<commit>`. O resumo do run lista o
+SHA-256 de cada jar.
+
 ## Compilar e testar
 
 ```bash

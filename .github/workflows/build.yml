@@ -1,0 +1,95 @@
+# Builds the mod and its companion WorldEdit agent from the same commit and publishes both jars, unzipped, as
+# artifacts of the same run (upload-artifact v7, archive: false: one file per artifact, downloaded as the jar itself).
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BASE_VERSION: 0.1.0-beta.1
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Java 8 runs Minecraft, 17/21 compile (the agent targets 8 with a 21 toolchain), 25 runs the Gradle daemon
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: |
+            8
+            17
+            21
+            25
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Version
+        run: echo "VERSION=${BASE_VERSION}-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Build mod (with unit tests)
+        run: >-
+          ./gradlew build --no-daemon
+          -Porg.gradle.java.installations.fromEnv=JAVA_HOME_8_X64,JAVA_HOME_17_X64,JAVA_HOME_21_X64,JAVA_HOME_25_X64
+
+      # The agent tests need the WorldEdit and Crucible jars, which are not redistributed: they are skipped here and
+      # run locally (README, "Compilar e testar").
+      - name: Build WorldEdit agent
+        run: >-
+          ./gradlew -p agent build --no-daemon
+          -Porg.gradle.java.installations.fromEnv=JAVA_HOME_8_X64,JAVA_HOME_17_X64,JAVA_HOME_21_X64,JAVA_HOME_25_X64
+
+      - name: Collect jars
+        id: jars
+        run: |
+          mod="build/libs/AkashicBellow-${VERSION}.jar"
+          agent="agent/build/libs/AkashicBellow-WorldEdit-6.1.9-${VERSION}-agent.jar"
+          ls -l "$mod" "$agent"
+          unzip -p "$agent" META-INF/MANIFEST.MF | grep -q "Premain-Class: com.akashiic.bellow.weagent.AgentMain"
+          echo "mod=$mod" >> "$GITHUB_OUTPUT"
+          echo "agent=$agent" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Artifacts (${VERSION})"
+            echo "| jar | size | sha256 |"
+            echo "|---|---|---|"
+            for f in "$mod" "$agent"; do
+              echo "| $(basename "$f") | $(stat -c %s "$f") | \`$(sha256sum "$f" | cut -c1-64)\` |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.jars.outputs.mod }}
+          archive: false
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.jars.outputs.agent }}
+          archive: false
+          if-no-files-found: error
+
+      - name: Test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports
+          path: |
+            build/reports/
+            agent/build/reports/
+          if-no-files-found: ignore

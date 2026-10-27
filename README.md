@@ -26,6 +26,9 @@ O desenho, as decisões e o motivo de não usar CubicChunks estão em [docs/DESI
 | GTNHLib | 0.11.40+ (TEOF 4.1 usa 0.11.51) |
 | ChunkAPI | 0.8.4+ (obrigatório) |
 
+Servidores: Forge e **Crucible** (testado com o build de produção 1.7.10-staging-67b53034; o Bellow corrige o Y que o
+CraftBukkit entregava aos plugins). Para proteger bases abaixo de 0 com plugins, veja `docs/DESIGN.md` §9.1.
+
 Opcionais com integração: Et Futurum Requiem, EndlessIDs, ArchaicFix (Phosphor), Hodgepodge, Angelica,
 IndustrialCraft 2 (Minerador e Magnetizador alcançam a camada profunda) e Galacticraft (foguetes não são destruídos
 abaixo de Y 0). Testado no servidor com IC2, Immersive Engineering e Galacticraft: veja `docs/DESIGN.md` §9–§10.
@@ -67,6 +70,7 @@ tools/selftest.sh                    # servidor, 3 fases (cria → gera/verifica
 tools/selftest.sh -Pbellow.compatRun=true          # idem com EFR + EndlessIDs + ArchaicFix + Hodgepodge
 tools/clienttest.sh                                # cliente headless (xvfb), renderer vanilla
 tools/clienttest.sh -Pbellow.compatRun=true -Pbellow.angelica=true   # cliente com Angelica
+tools/crucibletest.sh <cópia do servidor> [fase]   # Crucible real (server.jar, mods, plugins, agents)
 ```
 
 Num servidor com os mods do pack (jar reobfuscado em `mods/`), adicione

@@ -174,6 +174,9 @@ crescendo para o fundo, ferro concentrado perto de 0, cobre só no topo da faixa
 | Angelica | min/max de seção fixos; TEs criadas só para Y≥0 | mixins tardios; TEs profundas criadas na recepção |
 | EFR | deepslate/minérios | integração por reflexão; camada EFR (Y 0..22) continua dele |
 | Crucible/Spigot | `activeChunkSet` limpo no fim de `func_147456_g` | ticks aleatórios profundos injetados depois da chamada a `super.func_147456_g()` |
+| Crucible: pistão | o corpo de `canExtend` vai para `canExtend_IntCB` (CraftBukkit devolve o tamanho do empurrão) | variante do mixin escolhida no coremod ao detectar o CraftBukkit |
+| Crucible: `PlayerManager` | `chunkWatcherWithPlayers` vira `ConcurrentLinkedQueue` | fila acessada por `IDeepPlayerManager`, com uma implementação para Forge e outra para Crucible |
+| Crucible: CraftBukkit | `CraftWorld.getBlockAt`, `CraftChunk.getBlock` e `CraftBlock` fazem `y & 0xFF`: Y −10 virava 246 para todo plugin e todo evento Bukkit | abaixo de 0 a máscara vira −1 (`y & −1 == y`); 0..255 inalterado |
 | IC2 2.2.828 | Minerador para em Y 0 (5 comparações com 0); Magnetizador para em Y > 0 | mixins tardios: limites trocados pelo piso do mundo |
 | Galacticraft 4.0 | foguetes (`EntitySpaceshipBase`) são destruídos no servidor se `posY < 0` | mixin tardio: só abaixo do piso |
 
@@ -181,6 +184,18 @@ Os limites de IC2/GC foram encontrados por varredura de bytecode (comparações 
 diretos a `getBlockStorageArray`) e confirmados pela sonda de compatibilidade (§10), que os reprova sem os patches.
 Ocorrências restantes da varredura são inofensivas para uma base profunda: coletor de oxigênio do GC (só conta folhas
 em Y ≥ 0), entidades e geradores de dimensões espaciais (sem camada profunda), e falsos positivos.
+
+### 9.1 Plugins Bukkit (servidor de produção)
+
+O Crucible carrega as classes de plugin fora dos transformers do Forge: mixins não as alcançam (o
+`AkashicWorldEditEndlessIDsCompat` do pack reescreve o jar do WorldEdit justamente por isso). As saídas são um Java
+agent ou o patch do jar.
+
+| plugin | situação abaixo de 0 | caminho |
+|---|---|---|
+| GriefPreventionPlus 13.9 | claims 2D com profundidade mínima global `GriefPrevention.Claims.MaximumDepth`, que está em 0: nada abaixo de 0 é protegido | configuração (`-64`) |
+| WorldEdit 6.1.9 | `CuboidRegion` limita seleções a `clampY(0, maxY)`; `EditSession` recusa Y < 0 e usa `BoundedHeightMask(0, …)` | patch do plugin |
+| WorldGuard 6.2 | regiões nascem das seleções do WorldEdit (Y ≥ 0); regiões existentes começam em 0 | patch do WorldEdit + migração das regiões que vão do 0 ao topo |
 
 ## 10. Testes
 
@@ -214,6 +229,18 @@ em Y ≥ 0), entidades e geradores de dimensões espaciais (sem camada profunda)
   * Artefatos que a sonda passou a evitar, todos iguais em qualquer altura: metas inexistentes declaradas com
     TileEntity (MFR, ElectriCraft), jogadores falsos (Gadomancy × OpenBlocks), entidades registradas com frequência de
     rastreamento 0 (poções do Witchery) e entidades de efeito criadas sem estado (ChromatiCraft).
+* **Crucible de produção** (`tools/crucibletest.sh`; `server.jar` 1.7.10-staging-67b53034, pack inteiro, 66 plugins e os
+  dois agents do servidor, linha de comando de produção): self-test completo PASS, incluindo a sonda Bukkit
+  (`getBlockAt` mantém Y −10, tipo e luz corretos, `setTypeId` em −11 escreve em −11 e não em 245). O boot com o
+  Bellow ficou em ~110 s. Achados do caminho:
+  * O Mixin recusou subir enquanto o pistão e a fila do `PlayerManager` não tinham as variantes do Crucible (o
+    comportamento desejado de `require = 1`).
+  * Com `-Dterminal.jline=false` e a entrada padrão em fim de arquivo, o leitor de console do Crucible enfileira
+    comandos vazios até esgotar o heap (2,7 GB em 3 min). O harness usa uma entrada aberta que nunca envia nada; em
+    produção a entrada é o console do painel.
+  * Num mundo **novo**, os primeiros chunks são gerados dentro do construtor do `World`, antes de o CraftBukkit
+    registrar os vizinhos; o `updateLightByType` do Crucible (vindo do PaperSpigot) recusa toda atualização de luz
+    neles, em qualquer altura (medido também acima do solo). Mundos existentes carregam o spawn pelo caminho normal.
 * **Custo** (`-Dakashicbellow.selftest.phase=bench`): 529 chunks novos, servidor de produção com EndlessIDs:
 
   | | sem camada | −64 | −512 |
@@ -228,12 +255,9 @@ em Y ≥ 0), entidades e geradores de dimensões espaciais (sem camada profunda)
 
 ## 11. Riscos abertos (beta)
 
-* Crucible: a lógica sensível (`activeChunkSet`, comparações `y < 0` mantidas nos patches) foi revisada no código,
-  mas não executada — não há binário do Crucible neste ambiente. Teste num servidor de staging antes de produção.
-  No pack, 8 jars só existem para o Crucible/Bukkit (pontes, `necrotempus`, `EventHelper`, o fix de
-  `ChunkProviderServer` do DragonAPI); o teste do pack inteiro rodou sem eles. A fase de população legada é delimitada
-  em `Chunk.populateChunk`, não no `ChunkProviderServer` que o Crucible e esse fix modificam.
-  Cosmético.
+* Crucible: o servidor de produção foi testado (§10), sem jogadores reais conectados. O comportamento de plugins com
+  blocos abaixo de 0 depende do §9.1: até o patch do WorldEdit e o ajuste do GriefPreventionPlus, bases no fundo não
+  são protegidas por WorldGuard nem por claims.
 * Memória (medida, §10): −64 custa +40 KB por chunk carregado (+46%); −512 custa +351 KB (5×). Com distância de
   visão 10 (441 chunks por jogador isolado) são ≈ +18 MB por jogador em −64 e ≈ +150 MB em −512, no servidor e no
   cliente. Recomendado: −64 (padrão) a −128; −512 só com RAM sobrando e poucos jogadores espalhados.

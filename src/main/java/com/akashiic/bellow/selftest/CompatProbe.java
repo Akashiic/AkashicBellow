@@ -49,7 +49,7 @@ public final class CompatProbe {
     /** Control height for entities and multiblocks: underground above Y 0, like the tile entity cells. */
     private static final int CONTROL_Y = 30;
     /** Isolated recheck: one cell per item, this far apart, a single level. */
-    private static final int RECHECK_SPACING = 20, RECHECK_COLS = 9;
+    private static final int RECHECK_SPACING = 20, RECHECK_COLS = 12;
     private static final String SNAPSHOT = "akashicbellow-compat.dat";
 
     private final WorldServer world;
@@ -812,6 +812,38 @@ public final class CompatProbe {
                 + volatileTiles);
     }
 
+    /**
+     * NBT equality where lists are compared as multisets: some mods write lists from hash sets (OpenComputers
+     * components), so the order changes between saves without any change of state.
+     */
+    private static boolean equivalent(net.minecraft.nbt.NBTBase a, net.minecraft.nbt.NBTBase b) {
+        if (a == null || b == null) return a == b;
+        if (a instanceof NBTTagCompound && b instanceof NBTTagCompound) {
+            NBTTagCompound ca = (NBTTagCompound) a, cb = (NBTTagCompound) b;
+            @SuppressWarnings("unchecked")
+            Set<String> keys = (Set<String>) ca.func_150296_c();
+            if (!keys.equals(cb.func_150296_c())) return false;
+            for (String k : keys) if (!equivalent(ca.getTag(k), cb.getTag(k))) return false;
+            return true;
+        }
+        if (a instanceof NBTTagList && b instanceof NBTTagList) {
+            NBTTagList la = (NBTTagList) a.copy(), lb = (NBTTagList) b.copy();
+            if (la.tagCount() != lb.tagCount() || la.func_150303_d() != lb.func_150303_d()) return false;
+            List<net.minecraft.nbt.NBTBase> rest = new ArrayList<>();
+            while (lb.tagCount() > 0) rest.add(lb.removeTag(0));
+            outer: while (la.tagCount() > 0) {
+                net.minecraft.nbt.NBTBase x = la.removeTag(0);
+                for (int i = 0; i < rest.size(); i++) if (equivalent(x, rest.get(i))) {
+                    rest.remove(i);
+                    continue outer;
+                }
+                return false;
+            }
+            return true;
+        }
+        return a.equals(b);
+    }
+
     /** {@code modid:name:meta} to {@code modid:name}. */
     private static String blockId(String name) {
         int i = name.lastIndexOf(':');
@@ -824,8 +856,8 @@ public final class CompatProbe {
         keys.addAll((Set<String>) after.func_150296_c());
         Set<String> changed = new java.util.TreeSet<>();
         for (String k : keys) {
-            Object a = before.getTag(k), b = after.getTag(k);
-            if (a == null ? b != null : !a.equals(b)) changed.add(k);
+            net.minecraft.nbt.NBTBase a = before.getTag(k), b = after.getTag(k);
+            if (!equivalent(a, b)) changed.add(k);
         }
         return changed;
     }

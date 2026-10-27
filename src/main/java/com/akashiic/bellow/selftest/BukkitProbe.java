@@ -41,6 +41,7 @@ public final class BukkitProbe {
         world.setBlock(x, -10, z, Blocks.diamond_block, 0, 3);
         world.setBlock(x, 246, z, Blocks.gold_block, 0, 3);
         world.setBlock(x, -9, z, Blocks.glowstone, 0, 3);
+        world.setBlock(x, -8, z, Blocks.air, 0, 3); // light is read in the air above the glowstone
         Object block = getBlockAt.invoke(bworld, x, -10, z);
         int by = (Integer) block.getClass()
             .getMethod("getY")
@@ -57,7 +58,8 @@ public final class BukkitProbe {
         int light = (Byte) above.getClass()
             .getMethod("getLightFromBlocks")
             .invoke(getBlockAt.invoke(bworld, x, -8, z));
-        out.check("bukkit block light below 0", light >= 14, "light=" + light);
+        int nms = world.getSavedLightValue(net.minecraft.world.EnumSkyBlock.Block, x, -8, z);
+        out.check("bukkit block light below 0", light >= 14 && light == nms, "bukkit=" + light + " world=" + nms);
 
         Block before245 = world.getBlock(x, 245, z);
         above.getClass()
@@ -69,6 +71,6 @@ public final class BukkitProbe {
             "at -11: " + Block.blockRegistry.getNameForObject(world.getBlock(x, -11, z))
                 + ", at 245: "
                 + Block.blockRegistry.getNameForObject(world.getBlock(x, 245, z)));
-        for (int y : new int[] { -11, -10, -9, 246 }) world.setBlockToAir(x, y, z);
+        for (int y : new int[] { -11, -10, -9, -8, 246 }) world.setBlockToAir(x, y, z);
     }
 }

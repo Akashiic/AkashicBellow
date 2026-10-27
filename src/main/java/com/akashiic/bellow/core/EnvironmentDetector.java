@@ -15,6 +15,9 @@ public final class EnvironmentDetector {
 
     private static final String ARCHAIC_ENGINE = "org.embeddedt.archaicfix.lighting.world.lighting.LightingEngine";
 
+    /** Present on Crucible (and Thermos/Cauldron) servers. */
+    public static final String CRAFTBUKKIT_SERVER = "org.bukkit.craftbukkit.v1_7_R4.CraftServer";
+
     private EnvironmentDetector() {}
 
     public static boolean classExists(String name) {

@@ -13,19 +13,12 @@ import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.sugar.Local;
 
 /**
- * {@code if (j1 <= 0 || j1 >= world.getHeight()) return false;} in canExtend/tryExtend. Locals: x, y, z, side are the
- * int parameters (ordinals 0..3), then i1, j1 (ordinal 5).
+ * {@code if (j1 <= 0 || j1 >= world.getHeight()) return false;} in tryExtend. Locals: x, y, z, side are the int
+ * parameters (ordinals 0..3), then i1, j1 (ordinal 5). The same check in canExtend lives in a method whose name
+ * depends on the server: {@link MixinBlockPistonCanExtend_Forge} or {@link MixinBlockPistonCanExtend_Crucible}.
  */
 @Mixin(value = BlockPistonBase.class, priority = 1100)
 public abstract class MixinBlockPistonBase_Deep {
-
-    @Definition(id = "j1", local = @Local(type = int.class, ordinal = 5))
-    @Expression("j1 <= 0")
-    @ModifyExpressionValue(method = "canExtend", at = @At("MIXINEXTRAS:EXPRESSION"), require = 1, allow = 1)
-    private static boolean bellow$floorCanExtend(boolean original, @Local(argsOnly = true) World world,
-        @Local(type = int.class, ordinal = 5) int j1) {
-        return j1 <= BellowAPI.getMinY(world);
-    }
 
     @Definition(id = "j1", local = @Local(type = int.class, ordinal = 5))
     @Expression("j1 <= 0")

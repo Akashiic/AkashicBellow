@@ -35,6 +35,7 @@ public class BellowCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
         mixins.add("common.MixinChunk_DeepTileEntity");
         mixins.add("common.MixinChunkCache_Deep");
         // lighting: exactly one of the two, matching ArchaicFix's own decision
+        Compat.crucible = EnvironmentDetector.classExists(EnvironmentDetector.CRAFTBUKKIT_SERVER);
         Compat.phosphor = EnvironmentDetector.isPhosphorActive(loadedCoreMods);
         if (Compat.phosphor) {
             mixins.add("common.MixinChunk_DeepLightPhosphor");
@@ -55,6 +56,8 @@ public class BellowCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
         mixins.add("common.MixinEntityFallingBlock_Deep");
         mixins.add("common.MixinBlockFalling_Deep");
         mixins.add("common.MixinBlockPistonBase_Deep");
+        mixins.add(
+            Compat.crucible ? "common.MixinBlockPistonCanExtend_Crucible" : "common.MixinBlockPistonCanExtend_Forge");
         mixins.add("common.MixinBlockPlants_Deep");
         mixins.add("common.MixinPathFinder_Deep");
         mixins.add("common.MixinSpawnerAnimals_Deep");

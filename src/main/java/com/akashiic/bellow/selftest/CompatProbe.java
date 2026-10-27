@@ -64,14 +64,16 @@ public final class CompatProbe {
     private static final class Probe {
 
         final String name;
-        final int x, z;
+        final int x, z, deepY, controlY;
         String deepError, controlError;
         String deepClass, controlClass;
 
-        Probe(String name, int x, int z) {
+        Probe(String name, int x, int z, int deepY, int controlY) {
             this.name = name;
             this.x = x;
             this.z = z;
+            this.deepY = deepY;
+            this.controlY = controlY;
         }
     }
 
@@ -126,8 +128,12 @@ public final class CompatProbe {
 
     // ---------------------------------------------------------------- tile entities
 
+    /** Cells per level: 48 x 24, 4 blocks apart; levels are stacked 4 blocks apart (deep from floor + 8 up). */
+    private static final int COLS = 48, ROWS = 24, LEVEL = COLS * ROWS;
+
     private void place() {
-        int i = 0;
+        int i = 0, skipped = 0;
+        int floor = BellowAPI.getMinY(this.world);
         for (Object o : Block.blockRegistry) {
             Block block = (Block) o;
             String id = Block.blockRegistry.getNameForObject(block);
@@ -139,18 +145,90 @@ public final class CompatProbe {
                     has = false;
                 }
                 if (!has) continue;
-                int x = this.ox + (i % 48) * 4, z = this.oz + (i / 48) * 4;
+                int cell = i % LEVEL, level = i / LEVEL;
+                int x = this.ox + (cell % COLS) * 4, z = this.oz + (cell / COLS) * 4;
+                int dy = floor + 8 + level * 4, cy = 100 + level * 4;
+                if (dy > -4) {
+                    this.finding("probe ran out of room for tile entity " + id + ":" + meta);
+                    continue;
+                }
                 i++;
-                Probe p = new Probe(id + ":" + meta, x, z);
-                p.deepError = this.placeOne(block, meta, x, this.deepY, z);
-                p.controlError = this.placeOne(block, meta, x, CONTROL_Y, z);
-                p.deepClass = className(this.world.getTileEntity(x, this.deepY, z));
-                p.controlClass = className(this.world.getTileEntity(x, CONTROL_Y, z));
+                Probe p = new Probe(id + ":" + meta, x, z, dy, cy);
+                p.deepError = this.placeOne(block, meta, x, dy, z);
+                p.controlError = this.placeOne(block, meta, x, cy, z);
+                TileEntity deep = this.tileOrNull(x, dy, z);
+                String dCreate = this.takeError();
+                TileEntity control = this.tileOrNull(x, cy, z);
+                String cCreate = this.takeError();
+                p.deepClass = className(deep);
+                p.controlClass = className(control);
+                // A tile entity that throws on creation or on its first update at both heights (invalid metas,
+                // multiblock parts without their controller, ...) is a quirk of its mod; letting the world tick it
+                // would only crash the server.
+                String dErr = dCreate != null ? dCreate : updateOnce(deep);
+                String cErr = cCreate != null ? cCreate : updateOnce(control);
+                if (p.deepError != null && p.deepError.equals(p.controlError)) dErr = cErr = p.deepError;
+                if (dErr != null && dErr.equals(cErr)) {
+                    this.forceAir(x, dy, z);
+                    this.forceAir(x, cy, z);
+                    skipped++;
+                    this.out.add("SKIP tile " + p.name + ": first update fails at both heights (" + dErr + ")");
+                    continue;
+                }
+                if (dErr != null || cErr != null) {
+                    if (dErr != null) this.forceAir(x, dy, z);
+                    if (cErr != null) this.forceAir(x, cy, z);
+                    this.finding("tile " + p.name + " first update deep error=" + dErr + " control error=" + cErr);
+                    continue;
+                }
                 this.tiles.add(p);
             }
         }
-        this.out.add("INFO tile entity blocks placed: " + this.tiles.size());
-        this.cursorZ = this.oz + ((i + 47) / 48) * 4 + 4;
+        this.out.add("INFO tile entity blocks placed: " + this.tiles.size() + " (+" + skipped + " skipped)");
+        this.cursorZ = this.oz + Math.min(i, LEVEL) / COLS * 4 + 8;
+    }
+
+    private String lastError;
+
+    private String takeError() {
+        String e = this.lastError;
+        this.lastError = null;
+        return e;
+    }
+
+    /** {@code getTileEntity} creates missing tile entities lazily, which is where some mods throw. */
+    private TileEntity tileOrNull(int x, int y, int z) {
+        try {
+            return this.world.getTileEntity(x, y, z);
+        } catch (Throwable t) {
+            this.lastError = t.getClass()
+                .getName();
+            return null;
+        }
+    }
+
+    /** Air without running the block's breakBlock (which may query the broken tile entity again). */
+    private void forceAir(int x, int y, int z) {
+        net.minecraft.world.chunk.Chunk chunk = this.world.getChunkFromBlockCoords(x, z);
+        net.minecraft.world.chunk.storage.ExtendedBlockStorage ebs = y < 0 ? BellowAPI.getDeepSection(chunk, y >> 4)
+            : chunk.getBlockStorageArray()[y >> 4];
+        if (ebs != null) {
+            ebs.func_150818_a(x & 15, y & 15, z & 15, Blocks.air);
+            ebs.setExtBlockMetadata(x & 15, y & 15, z & 15, 0);
+        }
+        chunk.chunkTileEntityMap.remove(new net.minecraft.world.ChunkPosition(x & 15, y, z & 15));
+        this.world.markBlockForUpdate(x, y, z);
+    }
+
+    private static String updateOnce(TileEntity te) {
+        if (te == null) return null;
+        try {
+            te.updateEntity();
+            return null;
+        } catch (Throwable t) {
+            return t.getClass()
+                .getName();
+        }
     }
 
     /** Stone floor, air above, then the block; identical at both heights. */
@@ -395,8 +473,8 @@ public final class CompatProbe {
         loaded.addAll(this.world.loadedTileEntityList);
         int ok = 0;
         for (Probe p : this.tiles) {
-            TileEntity deep = this.world.getTileEntity(p.x, this.deepY, p.z);
-            TileEntity control = this.world.getTileEntity(p.x, CONTROL_Y, p.z);
+            TileEntity deep = this.world.getTileEntity(p.x, p.deepY, p.z);
+            TileEntity control = this.world.getTileEntity(p.x, p.controlY, p.z);
             String dState = state(deep, loaded), cState = state(control, loaded);
             boolean same = equalOrNull(p.deepError, p.controlError) && p.deepClass.equals(p.controlClass)
                 && dState.equals(cState);
@@ -453,19 +531,20 @@ public final class CompatProbe {
         if (event.world != this.world) return;
         NBTTagList snapshot = new NBTTagList();
         for (Probe p : this.tiles) {
-            TileEntity deep = this.world.getTileEntity(p.x, this.deepY, p.z);
-            TileEntity control = this.world.getTileEntity(p.x, CONTROL_Y, p.z);
+            TileEntity deep = this.world.getTileEntity(p.x, p.deepY, p.z);
+            TileEntity control = this.world.getTileEntity(p.x, p.controlY, p.z);
             if (deep == null || control == null) continue;
             NBTTagCompound e = new NBTTagCompound();
             e.setString("Name", p.name);
             e.setInteger("X", p.x);
             e.setInteger("Z", p.z);
+            e.setInteger("DY", p.deepY);
+            e.setInteger("CY", p.controlY);
             e.setTag("Deep", positionless(deep));
             e.setTag("Control", positionless(control));
             snapshot.appendTag(e);
         }
         NBTTagCompound root = new NBTTagCompound();
-        root.setInteger("DeepY", this.deepY);
         root.setTag("Tiles", snapshot);
         try {
             CompressedStreamTools.write(root, new File(SNAPSHOT));
@@ -509,7 +588,6 @@ public final class CompatProbe {
             this.finding("no snapshot from the compat phase");
             return;
         }
-        int deepY = root.getInteger("DeepY");
         NBTTagList list = root.getTagList("Tiles", 10);
         int ok = 0, volatileTiles = 0;
         Map<String, String> failures = new LinkedHashMap<>();
@@ -518,7 +596,7 @@ public final class CompatProbe {
         Map<String, Set<String>> controlQuirks = new java.util.HashMap<>();
         for (int i = 0; i < list.tagCount(); i++) {
             NBTTagCompound e = list.getCompoundTagAt(i);
-            TileEntity control = this.world.getTileEntity(e.getInteger("X"), CONTROL_Y, e.getInteger("Z"));
+            TileEntity control = this.world.getTileEntity(e.getInteger("X"), e.getInteger("CY"), e.getInteger("Z"));
             if (control == null) continue;
             controlQuirks.computeIfAbsent(blockId(e.getString("Name")), k -> new java.util.HashSet<>())
                 .addAll(changedKeys(e.getCompoundTag("Control"), positionless(control)));
@@ -526,7 +604,7 @@ public final class CompatProbe {
         for (int i = 0; i < list.tagCount(); i++) {
             NBTTagCompound e = list.getCompoundTagAt(i);
             int x = e.getInteger("X"), z = e.getInteger("Z");
-            TileEntity deep = this.world.getTileEntity(x, deepY, z);
+            TileEntity deep = this.world.getTileEntity(x, e.getInteger("DY"), z);
             if (deep == null) {
                 failures.put(e.getString("Name"), "missing after reload");
                 continue;

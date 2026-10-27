@@ -31,6 +31,7 @@ public class BellowCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
         mixins.add("common.MixinWorld_Deep");
         mixins.add("common.MixinChunk_Deep");
         mixins.add("common.MixinChunk_DeepLoad");
+        mixins.add("common.MixinChunk_LegacyPopulate");
         mixins.add("common.MixinChunk_DeepTileEntity");
         mixins.add("common.MixinChunkCache_Deep");
         // lighting: exactly one of the two, matching ArchaicFix's own decision

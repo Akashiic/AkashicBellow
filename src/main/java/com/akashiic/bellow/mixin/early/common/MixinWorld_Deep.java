@@ -11,6 +11,7 @@ import com.akashiic.bellow.compat.archaic.DeepLightingInstaller;
 import com.akashiic.bellow.core.Compat;
 import com.akashiic.bellow.world.ClientFloors;
 import com.akashiic.bellow.world.DeepWorlds;
+import com.akashiic.bellow.world.LegacyGeneration;
 import com.llamalad7.mixinextras.expression.Definition;
 import com.llamalad7.mixinextras.expression.Expression;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
@@ -115,7 +116,7 @@ public abstract class MixinWorld_Deep implements IDeepWorld {
         require = 1,
         allow = 1)
     private boolean bellow$belowFloor0(boolean original, @Local(argsOnly = true, ordinal = 1) int y) {
-        return y < this.bellow$getMinY();
+        return y < this.bellow$getMinY() || y < 0 && LegacyGeneration.active();
     }
 
     @Definition(id = "y", local = @Local(type = int.class, argsOnly = true, ordinal = 1))
@@ -137,7 +138,7 @@ public abstract class MixinWorld_Deep implements IDeepWorld {
         require = 1,
         allow = 1)
     private boolean bellow$belowFloor2(boolean original, @Local(argsOnly = true, ordinal = 1) int y) {
-        return y < this.bellow$getMinY();
+        return y < this.bellow$getMinY() || y < 0 && LegacyGeneration.active();
     }
 
     @Definition(id = "y", local = @Local(type = int.class, argsOnly = true, ordinal = 1))

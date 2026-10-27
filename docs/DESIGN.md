@@ -167,6 +167,13 @@ crescendo para o fundo, ferro concentrado perto de 0, cobre só no topo da faixa
 | Angelica | min/max de seção fixos; TEs criadas só para Y≥0 | mixins tardios; TEs profundas criadas na recepção |
 | EFR | deepslate/minérios | integração por reflexão; camada EFR (Y 0..22) continua dele |
 | Crucible/Spigot | `activeChunkSet` limpo no fim de `func_147456_g` | ticks aleatórios profundos injetados depois da chamada a `super.func_147456_g()` |
+| IC2 2.2.828 | Minerador para em Y 0 (5 comparações com 0); Magnetizador para em Y > 0 | mixins tardios: limites trocados pelo piso do mundo |
+| Galacticraft 4.0 | foguetes (`EntitySpaceshipBase`) são destruídos no servidor se `posY < 0` | mixin tardio: só abaixo do piso |
+
+Os limites de IC2/GC foram encontrados por varredura de bytecode (comparações de `yCoord`/`posY` com 0 e acessos
+diretos a `getBlockStorageArray`) e confirmados pela sonda de compatibilidade (§10), que os reprova sem os patches.
+Ocorrências restantes da varredura são inofensivas para uma base profunda: coletor de oxigênio do GC (só conta folhas
+em Y ≥ 0), entidades e geradores de dimensões espaciais (sem camada profunda), e falsos positivos.
 
 ## 10. Testes
 
@@ -175,6 +182,23 @@ crescendo para o fundo, ferro concentrado perto de 0, cobre só no topo da faixa
 * **Servidor, 3 fases em JVMs separadas** (`tools/selftest.sh [-Pbellow.compatRun=true]`): cria o mundo com a
   geração desligada (chunks "legados"), religa e verifica retrogen, terreno, blocos/meta/TileEntity, luz, minérios;
   depois uma JVM nova relê do disco. Roda sem mods e com EFR + EndlessIDs + ArchaicFix + Hodgepodge.
+* **Sonda de compatibilidade com mods reais** (`-Dakashicbellow.selftest.phase=compat`, depois `compatverify` numa JVM
+  nova; servidor de produção com o jar reobfuscado): coloca **todo bloco com TileEntity de todos os mods** (cada meta),
+  toda entidade registrada e todo multibloco do Immersive Engineering na camada profunda e numa altura de controle com
+  vizinhança idêntica; roda 1200 ticks; testa funcionalmente o Minerador e o Magnetizador do IC2; relê do disco.
+  Só diferenças entre profundo e controle contam. Resultado com IC2 + IE + Galacticraft + EFR + EndlessIDs +
+  Hodgepodge + NEI: 2059/2059 TileEntities iguais, 79/79 entidades (incluindo foguetes T1/T2/T3/carga), 14/18
+  multiblocos do IE formados nas duas alturas (os outros 4 não formam pela sonda em nenhuma altura), 1691/1830
+  TileEntities relidas byte a byte e as demais 139 mudam também no controle (estado que o próprio mod não salva,
+  ex.: `growthPoints` das plantações do IC2). Sem os patches de IC2/GC a mesma sonda reprova 8 itens.
+* **Custo** (`-Dakashicbellow.selftest.phase=bench`): 529 chunks novos, servidor de produção com EndlessIDs:
+
+  | | sem camada | −64 | −512 |
+  |---|---|---|---|
+  | heap por chunk | 87 KB | 127 KB | 438 KB |
+  | geração por chunk | 10,6 ms | 11,0 ms | 16,7 ms |
+  | pacote de chunk | 4,0 KB | 5,2 KB | 9,8 KB |
+  | disco por chunk | 6,8 KB | 7,7 KB | 11,7 KB |
 * **Cliente headless** (`tools/clienttest.sh [-Pbellow.compatRun=true -Pbellow.angelica=true]`, via `xvfb-run` e
   Mesa llvmpipe): mundo singleplayer, sala iluminada em `minY + 24`, tocha de parede colocada como jogador, baú;
   compara cliente × servidor (blocos, meta, TE, luz) e tira screenshots em `run/client/screenshots/`.
@@ -185,8 +209,11 @@ crescendo para o fundo, ferro concentrado perto de 0, cobre só no topo da faixa
   mas não executada — não há binário do Crucible neste ambiente. Teste num servidor de staging antes de produção.
 * Veios vanilla/modded de Y ≥ 0 podem invadir Y −1..−3 (o deepslate do EFR é substituível pela geração de minério).
   Cosmético.
-* Memória: cada seção ≈ 10 KB (mais com EndlessIDs). −64 adiciona 4 seções/chunk; −512 adiciona 32.
-  Recomendo −64 ou −128 em servidor.
+* Memória (medida, §10): −64 custa +40 KB por chunk carregado (+46%); −512 custa +351 KB (5×). Com distância de
+  visão 10 (441 chunks por jogador isolado) são ≈ +18 MB por jogador em −64 e ≈ +150 MB em −512, no servidor e no
+  cliente. Recomendado: −64 (padrão) a −128; −512 só com RAM sobrando e poucos jogadores espalhados.
+* Spawn natural: a altura é sorteada uniformemente entre o piso e o topo do chunk, como na 1.18. Em −64 isso é o
+  comportamento da 1.18; em −512 as tentativas na superfície ficam ≈ 7× mais raras que na 1.7.10.
 * Mods que iteram `getBlockStorageArray()` não veem as seções profundas (por design): scanners, quarries e
   minimapas de outros mods param em Y 0 até ganharem suporte via `BellowAPI`.
 * Cavernas profundas: projeto separado.

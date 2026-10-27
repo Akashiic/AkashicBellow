@@ -30,6 +30,12 @@ public class BellowLateMixins implements ILateMixinLoader {
             mixins.add("angelica.MixinWorldSlice_Deep");
             mixins.add("angelica.MixinCompatMathHelper_Deep");
         }
+        // Gameplay limits hardcoded to Y >= 0 in mods of the pack (found by bytecode scan, see docs/DESIGN.md).
+        if (loadedMods.contains("IC2")) {
+            mixins.add("ic2.MixinTileEntityMiner_Deep");
+            mixins.add("ic2.MixinTileEntityMagnetizer_Deep");
+        }
+        if (loadedMods.contains("GalacticraftCore")) mixins.add("galacticraft.MixinEntitySpaceshipBase_Deep");
         return mixins;
     }
 }

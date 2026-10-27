@@ -26,14 +26,16 @@ O desenho, as decisões e o motivo de não usar CubicChunks estão em [docs/DESI
 | GTNHLib | 0.11.40+ (TEOF 4.1 usa 0.11.51) |
 | ChunkAPI | 0.8.4+ (obrigatório) |
 
-Opcionais com integração: Et Futurum Requiem, EndlessIDs, ArchaicFix (Phosphor), Hodgepodge, Angelica.
+Opcionais com integração: Et Futurum Requiem, EndlessIDs, ArchaicFix (Phosphor), Hodgepodge, Angelica,
+IndustrialCraft 2 (Minerador e Magnetizador alcançam a camada profunda) e Galacticraft (foguetes não são destruídos
+abaixo de Y 0). Testado no servidor com IC2, Immersive Engineering e Galacticraft: veja `docs/DESIGN.md` §9–§10.
 O mod é obrigatório **no servidor e no cliente**.
 
 ## Configuração (`config/akashicbellow.cfg`)
 
 | opção | padrão | |
 |---|---|---|
-| `general.minY` | −64 | piso (múltiplo de 16). **Travado por mundo** no primeiro uso em `<mundo>/akashicbellow.dat` |
+| `general.minY` | −64 | piso (múltiplo de 16). **Travado por mundo** no primeiro uso em `<mundo>/akashicbellow.dat`. Custo medido: +46% de RAM por chunk em −64, 5× em −512 |
 | `general.dimensions` | `0` | dimensões com camada profunda |
 | `general.spawnMobsInDeep` | true | spawn natural também abaixo de 0 |
 | `worldgen.enabled` | true | gerar o subsolo |
@@ -66,6 +68,10 @@ tools/selftest.sh -Pbellow.compatRun=true          # idem com EFR + EndlessIDs +
 tools/clienttest.sh                                # cliente headless (xvfb), renderer vanilla
 tools/clienttest.sh -Pbellow.compatRun=true -Pbellow.angelica=true   # cliente com Angelica
 ```
+
+Num servidor com os mods do pack (jar reobfuscado em `mods/`), adicione
+`-Dakashicbellow.selftest=true -Dakashicbellow.selftest.exit=true -Dakashicbellow.selftest.phase=<fase>`:
+`compat` e depois `compatverify` (sonda de compatibilidade), ou `bench` (custo por chunk), num mundo novo.
 
 O teste de cliente precisa de `xvfb-run` e EGL/Mesa (`libegl1 libegl-mesa0 libgles2`).
 Os relatórios ficam em `run/server/akashicbellow-selftest-*.txt` e `run/client/akashicbellow-clienttest.txt`;

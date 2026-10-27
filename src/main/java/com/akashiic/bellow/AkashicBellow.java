@@ -91,6 +91,15 @@ public class AkashicBellow {
     public void serverStarted(FMLServerStartedEvent event) {
         if (!Boolean.getBoolean("akashicbellow.selftest")) return;
         net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
+        String phase = System.getProperty("akashicbellow.selftest.phase", "full");
+        if (phase.equals("bench")) {
+            com.akashiic.bellow.selftest.Bench.run(server);
+            return;
+        }
+        if (phase.startsWith("compat")) {
+            com.akashiic.bellow.selftest.CompatProbe.start(server, phase);
+            return;
+        }
         SelfTest test = new SelfTest(server.worldServerForDimension(0));
         java.util.List<String> lines = test.run();
         for (String line : lines) LOG.info("[selftest] {}", line);

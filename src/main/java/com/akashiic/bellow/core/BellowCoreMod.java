@@ -47,6 +47,12 @@ public class BellowCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
         mixins.add("common.PlayerManagerAccessor");
         mixins
             .add(Compat.crucible ? "common.MixinPlayerManagerQueue_Crucible" : "common.MixinPlayerManagerQueue_Forge");
+        if (Compat.crucible) {
+            // CraftBukkit masks Y with 0xFF when it builds blocks for plugins and events.
+            mixins.add("crucible.MixinCraftWorld_Deep");
+            mixins.add("crucible.MixinCraftChunk_Deep");
+            mixins.add("crucible.MixinCraftBlock_Deep");
+        }
         mixins.add("common.MixinC07PacketPlayerDigging_SignedY");
         mixins.add("common.MixinC08PacketPlayerBlockPlacement_SignedY");
         mixins.add("common.MixinS28PacketEffect_SignedY");

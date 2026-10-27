@@ -94,6 +94,13 @@ pedra opaca → minério opaco, luz 0 → 0). Chunks já vistos por jogadores re
 O intervalo Y ≥ 0 continua sendo da geração vanilla/modded 1.7.10 (sem dobrar o balanceamento do pack); os
 recursos são **cortados em Y < 0**.
 
+**Fase de população legada.** Os geradores da 1.7.10 (decorador vanilla e todo `IWorldGenerator` de mod) foram
+escritos para um mundo que termina em Y 0: veios e manchas sorteados perto do fundo contavam com a escrita abaixo de 0
+ser ignorada. Com o pack inteiro (Mekanism, IndustrialUpgrade, Eln, fósseis, IC2, GC…) isso vazava centenas de minérios
+de pedra para Y −1..−16, dentro do deepslate. Enquanto `Chunk.populateChunk` roda (delimitado com `@WrapMethod`,
+`try/finally`, aninhamento contado para cascatas), `setBlock`/`setBlockMetadataWithNotify` abaixo de Y 0 mantêm o
+comportamento da 1.7.10 (recusados). A geração profunda escreve direto nas seções e não é afetada.
+
 Os avisos "cascading worldgen" do ArchaicFix vistos nos testes aparecem também com a nossa geração desligada
 (36 na fase bootstrap do teste) e são emitidos dentro do `populate` vanilla — não vêm deste mod.
 
@@ -191,6 +198,22 @@ em Y ≥ 0), entidades e geradores de dimensões espaciais (sem camada profunda)
   multiblocos do IE formados nas duas alturas (os outros 4 não formam pela sonda em nenhuma altura), 1691/1830
   TileEntities relidas byte a byte e as demais 139 mudam também no controle (estado que o próprio mod não salva,
   ex.: `growthPoints` das plantações do IC2). Sem os patches de IC2/GC a mesma sonda reprova 8 itens.
+* **Pack TEOF 4.1 inteiro** (servidor Forge 1614, Java 8, ~200 mods; fora só os 8 jars que exigem Crucible/Bukkit e o
+  lwjgl3ify, que é de cliente). Mesma sonda, com o controle numa base subterrânea acima de 0 (Y 8+, entidades e
+  multiblocos em Y 30) e cada bloco numa cavidade de pedra selada:
+  * 4123 blocos com TileEntity (variantes obtíveis), 777 entidades (foguetes GC/ExtraPlanets tier 1–10 incluídos),
+    24 multiblocos IE/Immersive Petroleum (16 formados nas duas alturas, 8 a sonda não forma em nenhuma), IC2 funcional.
+  * 4026/4123 idênticos na grade densa; os 97 restantes e as 20 entidades sinalizadas foram retestados **isolados**
+    (`compatrecheck`, 20 blocos de distância): **97/97 e 20/20 idênticos**. A diferença na grade era interferência entre
+    células (fluxo do Thaumcraft, conversão em netherrack, efeitos de área que atravessam paredes), com perdas nos dois
+    sentidos (37 no fundo × 48 no controle).
+  * Recarga em JVM nova: 3180/3531 idênticos, 287 com chaves que mudam também no controle. Os demais, nenhum
+    específico do fundo: 61 ausentes **nas duas alturas** (o `soulJar` do ThaumicHorizons, colocado vazio, grava `null`
+    no NBT e derruba o salvamento da coluna de chunk inteira), o refletor de feixe do GC (só resolve o alvo no primeiro
+    tick depois de carregar) e listas do OpenComputers gravadas em ordem de hash (comparadas agora como multiconjuntos).
+  * Artefatos que a sonda passou a evitar, todos iguais em qualquer altura: metas inexistentes declaradas com
+    TileEntity (MFR, ElectriCraft), jogadores falsos (Gadomancy × OpenBlocks), entidades registradas com frequência de
+    rastreamento 0 (poções do Witchery) e entidades de efeito criadas sem estado (ChromatiCraft).
 * **Custo** (`-Dakashicbellow.selftest.phase=bench`): 529 chunks novos, servidor de produção com EndlessIDs:
 
   | | sem camada | −64 | −512 |
@@ -207,7 +230,9 @@ em Y ≥ 0), entidades e geradores de dimensões espaciais (sem camada profunda)
 
 * Crucible: a lógica sensível (`activeChunkSet`, comparações `y < 0` mantidas nos patches) foi revisada no código,
   mas não executada — não há binário do Crucible neste ambiente. Teste num servidor de staging antes de produção.
-* Veios vanilla/modded de Y ≥ 0 podem invadir Y −1..−3 (o deepslate do EFR é substituível pela geração de minério).
+  No pack, 8 jars só existem para o Crucible/Bukkit (pontes, `necrotempus`, `EventHelper`, o fix de
+  `ChunkProviderServer` do DragonAPI); o teste do pack inteiro rodou sem eles. A fase de população legada é delimitada
+  em `Chunk.populateChunk`, não no `ChunkProviderServer` que o Crucible e esse fix modificam.
   Cosmético.
 * Memória (medida, §10): −64 custa +40 KB por chunk carregado (+46%); −512 custa +351 KB (5×). Com distância de
   visão 10 (441 chunks por jogador isolado) são ≈ +18 MB por jogador em −64 e ≈ +150 MB em −512, no servidor e no
@@ -215,5 +240,8 @@ em Y ≥ 0), entidades e geradores de dimensões espaciais (sem camada profunda)
 * Spawn natural: a altura é sorteada uniformemente entre o piso e o topo do chunk, como na 1.18. Em −64 isso é o
   comportamento da 1.18; em −512 as tentativas na superfície ficam ≈ 7× mais raras que na 1.7.10.
 * Mods que iteram `getBlockStorageArray()` não veem as seções profundas (por design): scanners, quarries e
-  minimapas de outros mods param em Y 0 até ganharem suporte via `BellowAPI`.
+  minimapas de outros mods param em Y 0 até ganharem suporte via `BellowAPI`. O Distant Horizons do pack usa altura
+  fixa 0..256: as LODs não incluem a camada profunda (invisível da superfície de qualquer forma).
+* A sonda testa comportamento de servidor. O visual de máquinas específicas no cliente (TESR) foi validado só pelo
+  baú (mesmo caminho de renderização).
 * Cavernas profundas: projeto separado.

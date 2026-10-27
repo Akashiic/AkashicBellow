@@ -68,6 +68,33 @@ public final class BukkitProbe {
         world.setBlock(x + 2, -9, z, Blocks.glowstone, 0, 3);
         int reversed = world.getSavedLightValue(B, x + 2, -8, z);
         world.setBlockToAir(x + 2, -9, z);
+        // Same scenario above ground in the same chunk, and below 0 in a chunk loaded after world creation.
+        world.setBlock(x, 200, z, Blocks.glowstone, 0, 3);
+        int surface = world.getSavedLightValue(B, x, 201, z);
+        world.setBlockToAir(x, 200, z);
+        int fx = 16 * 1010 + 4, fz = 16 * 1010 + 4;
+        world.getChunkFromChunkCoords(1010, 1010);
+        for (int cx = 1009; cx <= 1011; cx++)
+            for (int cz = 1009; cz <= 1011; cz++) world.getChunkFromChunkCoords(cx, cz);
+        world.setBlock(fx, -8, fz, Blocks.air, 0, 3);
+        world.setBlock(fx, -9, fz, Blocks.glowstone, 0, 3);
+        int farDeep = world.getSavedLightValue(B, fx, -8, fz);
+        world.setBlockToAir(fx, -9, fz);
+        String spawnNeighbours;
+        try {
+            Object c = world.getChunkFromBlockCoords(x, z);
+            spawnNeighbours = String.valueOf(
+                c.getClass()
+                    .getMethod("areNeighborsLoaded", int.class)
+                    .invoke(c, 1));
+        } catch (ReflectiveOperationException e) {
+            spawnNeighbours = "n/a";
+        }
+        out.check(
+            "light in the probe chunk also fails above ground (Crucible spawn chunk, not deep-specific)",
+            nms != 0 || surface == 0,
+            "surface=" + surface + " farDeep=" + farDeep + " spawnChunk.areNeighborsLoaded(1)=" + spawnNeighbours);
+        out.check("bukkit-independent: deep light in a chunk loaded after start", farDeep >= 14, "farDeep=" + farDeep);
         out.check(
             "bukkit block light below 0",
             light >= 14 && light == nms,

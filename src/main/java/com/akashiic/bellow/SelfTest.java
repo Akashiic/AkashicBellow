@@ -1,0 +1,311 @@
+package com.akashiic.bellow;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import net.minecraft.block.Block;
+import net.minecraft.init.Blocks;
+import net.minecraft.tileentity.TileEntity;
+import net.minecraft.tileentity.TileEntityChest;
+import net.minecraft.world.EnumSkyBlock;
+import net.minecraft.world.World;
+import net.minecraft.world.WorldServer;
+import net.minecraft.world.chunk.Chunk;
+import net.minecraft.world.chunk.storage.ExtendedBlockStorage;
+import net.minecraft.world.gen.ChunkProviderServer;
+
+import com.akashiic.bellow.api.BellowAPI;
+import com.akashiic.bellow.api.DeepConstants;
+import com.akashiic.bellow.api.IDeepChunk;
+import com.akashiic.bellow.gen.DeepBlocks;
+import com.akashiic.bellow.gen.DeepTerrain;
+
+/**
+ * In-game verification of the deep layer on a live server world. Every check prints PASS/FAIL with the measured values.
+ * Used by {@code /bellow selftest} and, headless, by {@code -Dakashicbellow.selftest=true}.
+ * It writes blocks only inside two test chunks far from spawn.
+ */
+public final class SelfTest {
+
+    private final World world;
+    private final List<String> out = new ArrayList<>();
+    private int failures;
+
+    public SelfTest(World world) {
+        this.world = world;
+    }
+
+    public int failures() {
+        return this.failures;
+    }
+
+    private void check(String name, boolean ok, String detail) {
+        if (!ok) this.failures++;
+        this.out.add((ok ? "PASS " : "FAIL ") + name + (detail.isEmpty() ? "" : " - " + detail));
+    }
+
+    public List<String> run() {
+        int minY = BellowAPI.getMinY(this.world);
+        this.check("floor", minY < 0 && (minY & 15) == 0, "minY=" + minY + " dim=" + this.world.provider.dimensionId);
+        if (minY >= 0 || !(this.world instanceof WorldServer)) {
+            this.out.add("SKIP remaining checks: not a deep server world");
+            return this.out;
+        }
+        String phase = System.getProperty("akashicbellow.selftest.phase", "full");
+        if (phase.equals("bootstrap")) {
+            this.out.add("BOOTSTRAP world created");
+            return this.out;
+        }
+        try {
+            if (phase.equals("verify")) {
+                this.verifyPersisted(minY);
+            } else {
+                this.retrogen(minY);
+                this.terrain(minY);
+                this.blocks(minY);
+                this.light(minY);
+                this.writePersistenceMarkers(minY);
+                this.ores(minY);
+            }
+        } catch (Throwable t) {
+            this.check("no exception", false, t.toString());
+            AkashicBellow.LOG.error("Self test crashed", t);
+        }
+        this.out.add(this.failures == 0 ? "RESULT PASS" : "RESULT FAIL (" + this.failures + ")");
+        return this.out;
+    }
+
+    // ------------------------------------------------------------------ checks
+
+    private Chunk load(int cx, int cz) {
+        return this.world.getChunkProvider()
+            .loadChunk(cx, cz);
+    }
+
+    private void terrain(int minY) {
+        int cx0 = 1000, cz0 = 1000;
+        for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) this.load(cx0 + dx, cz0 + dz);
+        long[] bedrock = new long[6];
+        int columns = 0;
+        boolean floorSolid = true, aboveGradientClean = true, legacyGone = true, stateOk = true;
+        for (int dz = -1; dz <= 1; dz++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                Chunk c = this.load(cx0 + dx, cz0 + dz);
+                stateOk &= ((IDeepChunk) c).bellow$getGenState() >= DeepConstants.GEN_TERRAIN;
+                for (int z = 0; z < 16; z++) {
+                    for (int x = 0; x < 16; x++) {
+                        columns++;
+                        floorSolid &= c.getBlock(x, minY, z) == Blocks.bedrock;
+                        for (int k = 1; k <= 5; k++) if (c.getBlock(x, minY + k, z) == Blocks.bedrock) bedrock[k]++;
+                        for (int y = minY + 5; y < 0; y++) aboveGradientClean &= c.getBlock(x, y, z) != Blocks.bedrock;
+                        if (GenConfig.replaceLegacyBedrock) for (int y = 0; y <= GenConfig.legacyBedrockMaxY; y++)
+                            legacyGone &= c.getBlock(x, y, z) != Blocks.bedrock;
+                    }
+                }
+            }
+        }
+        this.check("terrain state", stateOk, "");
+        this.check("bedrock at floor", floorSolid, columns + " columns");
+        StringBuilder freq = new StringBuilder();
+        boolean freqOk = true;
+        for (int k = 1; k <= 4; k++) {
+            double expected = DeepTerrain.bedrockChance(minY + k, minY);
+            double measured = (double) bedrock[k] / columns;
+            // 4 sigma of a binomial with n = 2304
+            double tolerance = 4 * Math.sqrt(expected * (1 - expected) / columns);
+            freqOk &= Math.abs(measured - expected) <= tolerance;
+            freq.append(String.format("y=floor+%d %.3f (exp %.2f) ", k, measured, expected));
+        }
+        this.check(
+            "bedrock gradient",
+            freqOk && bedrock[5] == 0,
+            freq.toString()
+                .trim());
+        this.check("no bedrock above gradient", aboveGradientClean, "");
+        this.check("legacy bedrock replaced", legacyGone, "Y 0.." + GenConfig.legacyBedrockMaxY);
+        Block mid = this.load(cx0, cz0)
+            .getBlock(8, minY + 20, 8);
+        this.check("deep fill", mid != Blocks.air && mid != Blocks.bedrock, CommandNames.name(mid));
+    }
+
+    private void blocks(int minY) {
+        int x = 1000 * 16 + 8, z = 1000 * 16 + 8, y = minY + 20;
+        World w = this.world;
+        w.setBlock(x, y, z, Blocks.wool, 5, 3);
+        this.check(
+            "setBlock/getBlock",
+            w.getBlock(x, y, z) == Blocks.wool && w.getBlockMetadata(x, y, z) == 5,
+            CommandNames.name(w.getBlock(x, y, z)) + " meta " + w.getBlockMetadata(x, y, z));
+        w.setBlockMetadataWithNotify(x, y, z, 7, 3);
+        this.check("setBlockMetadata", w.getBlockMetadata(x, y, z) == 7, "meta " + w.getBlockMetadata(x, y, z));
+        w.setBlockToAir(x, y, z);
+        this.check("setBlockToAir", w.isAirBlock(x, y, z), "");
+        w.setBlock(x, y, z, Blocks.chest, 0, 3);
+        TileEntity te = w.getTileEntity(x, y, z);
+        this.check("tile entity", te instanceof TileEntityChest && te.yCoord == y, String.valueOf(te));
+        w.setBlockToAir(x, y, z);
+        this.check("tile entity removed", w.getTileEntity(x, y, z) == null, "");
+        this.check(
+            "below floor is void",
+            w.getBlock(x, minY - 1, z) == Blocks.air && !w.setBlock(x, minY - 1, z, Blocks.stone),
+            "");
+        this.check("blockExists", w.blockExists(x, y, z) && !w.blockExists(x, minY - 1, z), "");
+        this.check("vanilla region untouched", w.getBlock(x, 0, z) != null, CommandNames.name(w.getBlock(x, 0, z)));
+    }
+
+    private void light(int minY) {
+        World w = this.world;
+        int x = 1000 * 16 + 4, z = 1000 * 16 + 4, y = minY + 30;
+        for (int dx = -2; dx <= 2; dx++)
+            for (int dy = -2; dy <= 2; dy++) for (int dz = -2; dz <= 2; dz++) w.setBlockToAir(x + dx, y + dy, z + dz);
+        w.setBlock(x, y, z, Blocks.glowstone);
+        int at1 = w.getSavedLightValue(EnumSkyBlock.Block, x + 1, y, z);
+        int at2 = w.getSavedLightValue(EnumSkyBlock.Block, x, y + 2, z);
+        int sky = w.getSavedLightValue(EnumSkyBlock.Sky, x + 1, y, z);
+        this.check("block light propagates", at1 == 14 && at2 == 13, "d1=" + at1 + " d2=" + at2);
+        this.check("no sky light underground", sky == 0, "sky=" + sky);
+        w.setBlockToAir(x, y, z);
+        int after = w.getSavedLightValue(EnumSkyBlock.Block, x + 1, y, z);
+        this.check("block light removed", after == 0, "d1=" + after);
+    }
+
+    // Persistence is verified across two server processes: markers are written here, the world is saved on stop, and
+    // the "verify" phase reads them back from disk in a fresh JVM.
+    private static final int MARK_CX = 1040, MARK_CZ = 1040;
+
+    private void writePersistenceMarkers(int minY) {
+        this.load(MARK_CX, MARK_CZ);
+        int x = MARK_CX * 16 + 3, z = MARK_CZ * 16 + 5;
+        this.world.setBlock(x, minY + 3, z, Blocks.diamond_block);
+        this.world.setBlock(x, minY + 9, z, Blocks.chest);
+        TileEntity te = this.world.getTileEntity(x, minY + 9, z);
+        if (te instanceof TileEntityChest)
+            ((TileEntityChest) te).setInventorySlotContents(0, new net.minecraft.item.ItemStack(Blocks.dirt, 7));
+        this.world.setBlock(x, -1, z, Blocks.wool, 11, 3);
+        this.check("persistence markers written", this.world.getBlock(x, minY + 3, z) == Blocks.diamond_block, "");
+    }
+
+    private void verifyPersisted(int minY) {
+        ChunkProviderServer provider = (ChunkProviderServer) this.world.getChunkProvider();
+        this.check("marker chunk not loaded before verify", !provider.chunkExists(MARK_CX, MARK_CZ), "");
+        Chunk c = this.load(MARK_CX, MARK_CZ);
+        int x = MARK_CX * 16 + 3, z = MARK_CZ * 16 + 5;
+        IDeepChunk deep = (IDeepChunk) c;
+        this.check("read from disk", deep.bellow$isFromDisk(), "");
+        this.check(
+            "gen state persisted",
+            deep.bellow$getGenState() >= DeepConstants.GEN_TERRAIN,
+            "gen=" + deep.bellow$getGenState());
+        this.check(
+            "deep block persisted",
+            c.getBlock(x & 15, minY + 3, z & 15) == Blocks.diamond_block,
+            CommandNames.name(c.getBlock(x & 15, minY + 3, z & 15)));
+        this.check(
+            "deep block meta persisted",
+            this.world.getBlock(x, -1, z) == Blocks.wool && this.world.getBlockMetadata(x, -1, z) == 11,
+            CommandNames.name(this.world.getBlock(x, -1, z), this.world.getBlockMetadata(x, -1, z)));
+        TileEntity te = this.world.getTileEntity(x, minY + 9, z);
+        net.minecraft.item.ItemStack stack = te instanceof TileEntityChest ? ((TileEntityChest) te).getStackInSlot(0)
+            : null;
+        this.check(
+            "deep tile entity persisted",
+            stack != null && stack.stackSize == 7
+                && stack.getItem() == net.minecraft.item.Item.getItemFromBlock(Blocks.dirt),
+            String.valueOf(te) + " " + stack);
+        this.check("bedrock floor persisted", c.getBlock(0, minY, 0) == Blocks.bedrock, "");
+    }
+
+    /** Spawn chunks of a world first generated with worldgen.enabled=false must have been filled on load. */
+    private void retrogen(int minY) {
+        net.minecraft.util.ChunkCoordinates spawn = this.world.getSpawnPoint();
+        Chunk c = this.world.getChunkFromBlockCoords(spawn.posX, spawn.posZ);
+        IDeepChunk deep = (IDeepChunk) c;
+        if (!deep.bellow$isFromDisk()) {
+            this.out.add("SKIP retrogen: spawn chunk was generated in this session");
+            return;
+        }
+        boolean filled = c.getBlock(8, minY, 8) == Blocks.bedrock && c.getBlock(8, minY + 30, 8) != Blocks.air;
+        boolean legacyGone = true;
+        for (int y = 0; y <= GenConfig.legacyBedrockMaxY; y++)
+            for (int i = 0; i < 256; i++) legacyGone &= c.getBlock(i & 15, y, i >> 4) != Blocks.bedrock;
+        this.check(
+            "retrogen of legacy chunk",
+            filled && deep.bellow$getGenState() >= DeepConstants.GEN_TERRAIN,
+            "chunk [" + c.xPosition + ", " + c.zPosition + "] gen=" + deep.bellow$getGenState());
+        this.check("retrogen replaced legacy bedrock", !GenConfig.replaceLegacyBedrock || legacyGone, "");
+    }
+
+    private void ores(int minY) {
+        int cx0 = 1100, cz0 = 1100, radius = 5;
+        for (int dz = -radius - 1; dz <= radius + 1; dz++)
+            for (int dx = -radius - 1; dx <= radius + 1; dx++) this.load(cx0 + dx, cz0 + dz);
+        int decorated = 0, total = 0;
+        for (int dz = -radius; dz <= radius; dz++) for (int dx = -radius; dx <= radius; dx++) {
+            total++;
+            if (((IDeepChunk) this.load(cx0 + dx, cz0 + dz)).bellow$getGenState() == DeepConstants.GEN_DECORATED)
+                decorated++;
+        }
+        this.check("decoration ran", decorated == total, decorated + "/" + total + " chunks decorated");
+        Map<String, long[]> h = histogram(this.world, cx0, cz0, radius);
+        long diamonds = sum(h, "diamond_ore");
+        this.check(
+            "diamonds below 0",
+            diamonds > 0,
+            diamonds + " in " + total + " chunks (" + String.format("%.2f", diamonds / (double) total) + "/chunk)");
+        for (Map.Entry<String, long[]> e : h.entrySet()) {
+            StringBuilder b = new StringBuilder("INFO ").append(e.getKey())
+                .append(" per 16-band:");
+            for (long v : e.getValue()) b.append(' ')
+                .append(v);
+            this.out.add(b.toString());
+        }
+    }
+
+    private static long sum(Map<String, long[]> h, String fragment) {
+        long s = 0;
+        for (Map.Entry<String, long[]> e : h.entrySet()) if (e.getKey()
+            .contains(fragment)) for (long v : e.getValue()) s += v;
+        return s;
+    }
+
+    /** Counts every block below Y 0 that is neither the fill nor bedrock, per 16-block band (bottom band first). */
+    public static Map<String, long[]> histogram(World world, int cx0, int cz0, int radius) {
+        int minY = BellowAPI.getMinY(world);
+        int bands = Math.max(0, -minY >> 4);
+        Map<String, long[]> counts = new HashMap<>();
+        for (int dz = -radius; dz <= radius; dz++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                if (!world.getChunkProvider()
+                    .chunkExists(cx0 + dx, cz0 + dz)) continue;
+                Chunk c = world.getChunkFromChunkCoords(cx0 + dx, cz0 + dz);
+                for (int sy = minY >> 4; sy < 0; sy++) {
+                    ExtendedBlockStorage ebs = BellowAPI.getDeepSection(c, sy);
+                    if (ebs == null) continue;
+                    int band = sy - (minY >> 4);
+                    for (int i = 0; i < 4096; i++) {
+                        int x = i & 15, y = i >> 8, z = i >> 4 & 15;
+                        Block b = ebs.getBlockByExtId(x, y, z);
+                        int meta = ebs.getExtBlockMetadata(x, y, z);
+                        if (b == Blocks.bedrock || b == DeepBlocks.fill && meta == DeepBlocks.fillMeta) continue;
+                        counts.computeIfAbsent(CommandNames.name(b, meta), k -> new long[bands])[band]++;
+                    }
+                }
+            }
+        }
+        return counts;
+    }
+
+    /** Block naming shared with the command. */
+    static final class CommandNames {
+
+        static String name(Block b) {
+            return name(b, 0);
+        }
+
+        static String name(Block b, int meta) {
+            return BellowCommand.name(b, meta);
+        }
+    }
+}

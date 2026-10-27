@@ -1,0 +1,31 @@
+dependencies {
+    implementation("com.github.GTNewHorizons:GTNHLib:0.11.40:dev")
+
+    // Hard dependency: ChunkAPI owns chunk NBT and chunk packets in the target environment.
+    implementation("com.falsepattern:chunkapi-mc1.7.10:0.8.4:dev")
+    runtimeOnlyNonPublishable("com.falsepattern:falsepatternlib-mc1.7.10:1.12.2:dev")
+
+    // Compat targets (compile-time only; every use is guarded at runtime).
+    compileOnly(rfg.deobf("maven.modrinth:archaicfix:0.8.0"))
+
+    compileOnly("org.jetbrains:annotations:26.0.2")
+
+    if (project.findProperty("bellow.compatRun") == "true") {
+        runtimeOnlyNonPublishable("com.falsepattern:endlessids-mc1.7.10:1.7.4:dev")
+        runtimeOnlyNonPublishable("ganymedes01.etfuturum:Et-Futurum-Requiem:2.6.59-GTNH:dev")
+        runtimeOnlyNonPublishable("com.github.GTNewHorizons:Hodgepodge:2.7.189:dev")
+        runtimeOnlyNonPublishable(rfg.deobf("maven.modrinth:archaicfix:0.8.0"))
+    }
+
+    testImplementation(platform('org.junit:junit-bom:5.9.2'))
+    testImplementation('org.junit.jupiter:junit-jupiter')
+    testRuntimeOnly('org.junit.platform:junit-platform-launcher')
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+    }
+}

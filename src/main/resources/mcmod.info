@@ -1,0 +1,13 @@
+[
+  {
+    "modid": "akashicbellow",
+    "name": "Akashic Bellow",
+    "description": "Negative world layers (Y below 0) for 1.7.10 with 1.18-style deep generation and retrogen of existing worlds.",
+    "version": "${modVersion}",
+    "mcversion": "${minecraftVersion}",
+    "url": "https://github.com/Akashiic/AkashicBellow",
+    "authorList": ["Akashiic"],
+    "credits": "Ore placement ported from Minecraft 1.18 OreFeature; lighting engine based on Phosphor (via ArchaicFix).",
+    "dependencies": ["chunkapi"]
+  }
+]

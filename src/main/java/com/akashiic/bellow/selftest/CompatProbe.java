@@ -295,7 +295,9 @@ public final class CompatProbe {
             if (destructive(e.getKey()) || c == null
                 || net.minecraft.entity.IProjectile.class.isAssignableFrom(c)
                 || net.minecraft.entity.projectile.EntityFireball.class.isAssignableFrom(c)
-                || net.minecraft.entity.EntityHanging.class.isAssignableFrom(c)) continue;
+                || net.minecraft.entity.EntityHanging.class.isAssignableFrom(c)
+                // Fake players join world.playerEntities, where other mods expect real connections (OpenBlocks).
+                || EntityPlayer.class.isAssignableFrom(c)) continue;
             int x = this.ox + 2 + (i % 32) * 6, z = z0 + 2 + (i / 32) * 6;
             Entity deep = this.spawnBoxed(e.getKey(), x, this.deepY, z);
             Entity control = this.spawnBoxed(e.getKey(), x, CONTROL_Y, z);

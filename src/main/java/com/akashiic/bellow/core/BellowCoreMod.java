@@ -45,6 +45,8 @@ public class BellowCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
         // network
         mixins.add("common.MixinPlayerInstance_Deep");
         mixins.add("common.PlayerManagerAccessor");
+        mixins
+            .add(Compat.crucible ? "common.MixinPlayerManagerQueue_Crucible" : "common.MixinPlayerManagerQueue_Forge");
         mixins.add("common.MixinC07PacketPlayerDigging_SignedY");
         mixins.add("common.MixinC08PacketPlayerBlockPlacement_SignedY");
         mixins.add("common.MixinS28PacketEffect_SignedY");

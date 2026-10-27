@@ -18,6 +18,7 @@ import com.akashiic.bellow.api.BellowAPI;
 import com.akashiic.bellow.net.DeepChanges;
 import com.akashiic.bellow.net.DeepNet;
 import com.akashiic.bellow.net.IDeepPlayerInstance;
+import com.akashiic.bellow.net.IDeepPlayerManager;
 
 /**
  * Keeps block changes below Y 0 out of the vanilla short-packed change list and flushes them with the regular chunk
@@ -52,8 +53,7 @@ public abstract class MixinPlayerInstance_Deep implements IDeepPlayerInstance, D
         DeepChanges changes = this.bellow$changes;
         if (changes == null) changes = this.bellow$changes = new DeepChanges();
         if (changes.isEmpty() && this.numberOfTilesToUpdate == 0) {
-            ((PlayerManagerAccessor) this.this$0).bellow$getChunkWatcherWithPlayers()
-                .add(this);
+            ((IDeepPlayerManager) this.this$0).bellow$queueForUpdate(this);
         }
         changes.add(localX, y, localZ);
     }

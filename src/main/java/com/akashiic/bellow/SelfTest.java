@@ -9,7 +9,6 @@ import net.minecraft.block.Block;
 import net.minecraft.init.Blocks;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.tileentity.TileEntityChest;
-import net.minecraft.util.ChunkCoordinates;
 import net.minecraft.world.EnumSkyBlock;
 import net.minecraft.world.World;
 import net.minecraft.world.WorldServer;
@@ -70,9 +69,7 @@ public final class SelfTest {
                 this.writePersistenceMarkers(minY);
                 this.ores(minY);
                 if (com.akashiic.bellow.core.Compat.crucible) {
-                    ChunkCoordinates spawn = this.world.getSpawnPoint();
-                    com.akashiic.bellow.selftest.BukkitProbe
-                        .run((WorldServer) this.world, spawn.posX + 3, spawn.posZ + 3, this::check);
+                    com.akashiic.bellow.selftest.BukkitProbe.run((WorldServer) this.world, this::check);
                 }
             }
         } catch (Throwable t) {

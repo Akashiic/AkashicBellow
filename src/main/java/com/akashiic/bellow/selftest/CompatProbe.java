@@ -64,12 +64,14 @@ public final class CompatProbe {
     private static final class Probe {
 
         final String name;
+        final Block block;
         final int x, z, deepY, controlY;
         String deepError, controlError;
         String deepClass, controlClass;
 
-        Probe(String name, int x, int z, int deepY, int controlY) {
+        Probe(String name, Block block, int x, int z, int deepY, int controlY) {
             this.name = name;
+            this.block = block;
             this.x = x;
             this.z = z;
             this.deepY = deepY;
@@ -153,7 +155,7 @@ public final class CompatProbe {
                     continue;
                 }
                 i++;
-                Probe p = new Probe(id + ":" + meta, x, z, dy, cy);
+                Probe p = new Probe(id + ":" + meta, block, x, z, dy, cy);
                 p.deepError = this.placeOne(block, meta, x, dy, z);
                 p.controlError = this.placeOne(block, meta, x, cy, z);
                 TileEntity deep = this.tileOrNull(x, dy, z);
@@ -254,12 +256,14 @@ public final class CompatProbe {
         }
     }
 
-    /** Stone floor, air above, then the block; identical at both heights. */
+    /** The block in a sealed cavity; identical at both heights. */
     private String placeOne(Block block, int meta, int x, int y, int z) {
         try {
-            for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
-                this.world.setBlock(x + dx, y - 1, z + dz, Blocks.stone, 0, 2);
-                for (int dy = 0; dy < 3; dy++) this.world.setBlock(x + dx, y + dy, z + dz, Blocks.air, 0, 2);
+            // Sealed 3x3x3 cavity in stone (walls shared with the neighbouring cells): fire, liquids, decay and
+            // spreading blocks stay inside, and the control height gets no sky, rain or meteors either.
+            for (int dx = -2; dx <= 2; dx++) for (int dz = -2; dz <= 2; dz++) for (int dy = -1; dy <= 3; dy++) {
+                boolean shell = Math.abs(dx) == 2 || Math.abs(dz) == 2 || dy == -1 || dy == 3;
+                this.world.setBlock(x + dx, y + dy, z + dz, shell ? Blocks.stone : Blocks.air, 0, 2);
             }
             this.world.setBlock(x, y, z, block, meta, 3);
             return null;
@@ -507,16 +511,42 @@ public final class CompatProbe {
     private void afterTicks() {
         Set<Object> loaded = Collections.newSetFromMap(new IdentityHashMap<>());
         loaded.addAll(this.world.loadedTileEntityList);
-        int ok = 0;
+        int ok = 0, random = 0;
         for (Probe p : this.tiles) {
             TileEntity deep = this.world.getTileEntity(p.x, p.deepY, p.z);
             TileEntity control = this.world.getTileEntity(p.x, p.controlY, p.z);
             String dState = state(deep, loaded), cState = state(control, loaded);
             boolean same = equalOrNull(p.deepError, p.controlError) && p.deepClass.equals(p.controlClass)
                 && dState.equals(cState);
-            if (!same) {
+            if (!same && p.block.getTickRandomly() && (dState.equals("absent") || cState.equals("absent"))) {
+                // Leaves, fruit, crops: random ticks decide whether they decay within the run, independently at
+                // each height. Listed for review, not counted.
+                random++;
+                this.out.add(
+                    "RANDOM tile " + p.name
+                        + " deep="
+                        + dState
+                        + "->"
+                        + this.blockAt(p.x, p.deepY, p.z)
+                        + " control="
+                        + cState
+                        + "->"
+                        + this.blockAt(p.x, p.controlY, p.z));
+            } else if (!same) {
                 this.finding(
                     "tile " + p.name
+                        + " at "
+                        + p.x
+                        + ","
+                        + p.deepY
+                        + "/"
+                        + p.controlY
+                        + ","
+                        + p.z
+                        + " now "
+                        + this.blockAt(p.x, p.deepY, p.z)
+                        + "/"
+                        + this.blockAt(p.x, p.controlY, p.z)
                         + " deep["
                         + p.deepClass
                         + ", "
@@ -534,6 +564,7 @@ public final class CompatProbe {
         }
         this.out.add(
             "INFO tile entities identical at both heights after " + TICKS + " ticks: " + ok + "/" + this.tiles.size());
+        this.out.add("INFO random-ticking blocks that decayed at one height only (listed as RANDOM): " + random);
 
         int eok = 0;
         for (EntityProbe e : this.entities) {
@@ -557,14 +588,26 @@ public final class CompatProbe {
         }
         this.out.add("INFO entities behaving the same at both heights: " + eok + "/" + this.entities.size());
 
-        // The snapshot is taken by the final save itself: the server may run catch-up ticks after
-        // initiateShutdown, and a tile entity ticking after an early snapshot would look like a persistence bug.
-        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(this);
+        // The snapshot is taken when the server stops: after its last tick (it may run catch-up ticks after
+        // initiateShutdown) and before the final save. A save event is not reliable in a large pack.
+        awaitingStop = this;
     }
 
-    @SubscribeEvent
-    public void onWorldSave(net.minecraftforge.event.world.WorldEvent.Save event) {
-        if (event.world != this.world) return;
+    private static CompatProbe awaitingStop;
+
+    /** {@code FMLServerStoppingEvent}: the main loop has ended, the worlds are not saved yet. */
+    public static void onServerStopping() {
+        CompatProbe probe = awaitingStop;
+        awaitingStop = null;
+        if (probe != null) probe.writeSnapshot();
+    }
+
+    private String blockAt(int x, int y, int z) {
+        return Block.blockRegistry.getNameForObject(this.world.getBlock(x, y, z)) + ":"
+            + this.world.getBlockMetadata(x, y, z);
+    }
+
+    private void writeSnapshot() {
         NBTTagList snapshot = new NBTTagList();
         for (Probe p : this.tiles) {
             TileEntity deep = this.world.getTileEntity(p.x, p.deepY, p.z);

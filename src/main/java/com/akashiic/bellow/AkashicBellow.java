@@ -115,6 +115,11 @@ public class AkashicBellow {
     }
 
     @Mod.EventHandler
+    public void serverStopping(cpw.mods.fml.common.event.FMLServerStoppingEvent event) {
+        com.akashiic.bellow.selftest.CompatProbe.onServerStopping();
+    }
+
+    @Mod.EventHandler
     public void serverStopped(FMLServerStoppedEvent event) {
         DeepWorlds.clearCache();
     }

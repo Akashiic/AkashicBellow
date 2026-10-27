@@ -149,7 +149,10 @@ public final class CompatProbe {
                 if (!has) continue;
                 int cell = i % LEVEL, level = i / LEVEL;
                 int x = this.ox + (cell % COLS) * 4, z = this.oz + (cell / COLS) * 4;
-                int dy = floor + 8 + level * 4, cy = 100 + level * 4;
+                // Control: an ordinary underground base above Y 0. A control at the top of the column is hit by
+                // everything
+                // that targets the surface (meteors, flux, lightning, snow) and the deep cells never are.
+                int dy = floor + 8 + level * 4, cy = 8 + level * 4;
                 if (dy > -4) {
                     this.finding("probe ran out of room for tile entity " + id + ":" + meta);
                     continue;
@@ -607,11 +610,22 @@ public final class CompatProbe {
             + this.world.getBlockMetadata(x, y, z);
     }
 
+    private static boolean serializable(NBTTagCompound tag) {
+        try {
+            CompressedStreamTools.write(tag, new java.io.DataOutputStream(new java.io.ByteArrayOutputStream()));
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     private void writeSnapshot() {
         NBTTagList snapshot = new NBTTagList();
+        NBTTagList unserializable = new NBTTagList();
         for (Probe p : this.tiles) {
-            TileEntity deep = this.world.getTileEntity(p.x, p.deepY, p.z);
-            TileEntity control = this.world.getTileEntity(p.x, p.controlY, p.z);
+            TileEntity deep = this.tileOrNull(p.x, p.deepY, p.z);
+            TileEntity control = this.tileOrNull(p.x, p.controlY, p.z);
+            this.lastError = null;
             if (deep == null || control == null) continue;
             NBTTagCompound e = new NBTTagCompound();
             e.setString("Name", p.name);
@@ -619,12 +633,23 @@ public final class CompatProbe {
             e.setInteger("Z", p.z);
             e.setInteger("DY", p.deepY);
             e.setInteger("CY", p.controlY);
-            e.setTag("Deep", positionless(deep));
-            e.setTag("Control", positionless(control));
+            NBTTagCompound d = positionless(deep), c = positionless(control);
+            // Some tile entities write null values, which only fails at serialization (and fails the chunk save
+            // the same way). Checked per entry so one bad tile cannot void the whole snapshot.
+            boolean dOk = serializable(d), cOk = serializable(c);
+            if (!dOk || !cOk) {
+                unserializable.appendTag(
+                    new net.minecraft.nbt.NBTTagString(
+                        p.name + " deep=" + (dOk ? "ok" : "fails") + " control=" + (cOk ? "ok" : "fails")));
+                continue;
+            }
+            e.setTag("Deep", d);
+            e.setTag("Control", c);
             snapshot.appendTag(e);
         }
         NBTTagCompound root = new NBTTagCompound();
         root.setTag("Tiles", snapshot);
+        root.setTag("Unserializable", unserializable);
         try {
             CompressedStreamTools.write(root, new File(SNAPSHOT));
         } catch (Exception ex) {
@@ -668,6 +693,12 @@ public final class CompatProbe {
             return;
         }
         NBTTagList list = root.getTagList("Tiles", 10);
+        NBTTagList unserializable = root.getTagList("Unserializable", 8);
+        for (int i = 0; i < unserializable.tagCount(); i++) {
+            String u = unserializable.getStringTagAt(i);
+            if (u.endsWith("deep=fails control=ok")) this.finding("tile NBT cannot be serialized only deep: " + u);
+            else this.out.add("INFO tile NBT cannot be serialized (mod bug, not deep-specific): " + u);
+        }
         int ok = 0, volatileTiles = 0;
         Map<String, String> failures = new LinkedHashMap<>();
         // Keys that change on reload at the control height, per block id. A mod quirk shows up on random instances

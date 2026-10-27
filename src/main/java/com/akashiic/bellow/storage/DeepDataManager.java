@@ -2,8 +2,12 @@ package com.akashiic.bellow.storage;
 
 import java.nio.ByteBuffer;
 
+import net.minecraft.block.Block;
+import net.minecraft.init.Blocks;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
+import net.minecraft.tileentity.TileEntity;
+import net.minecraft.world.ChunkPosition;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.chunk.storage.ExtendedBlockStorage;
@@ -16,6 +20,8 @@ import com.akashiic.bellow.api.BellowAPI;
 import com.akashiic.bellow.api.DeepConstants;
 import com.akashiic.bellow.api.IDeepChunk;
 import com.akashiic.bellow.api.IDeepWorld;
+import com.akashiic.bellow.compat.angelica.AngelicaTiles;
+import com.akashiic.bellow.core.Compat;
 import com.akashiic.bellow.net.DeepNet;
 import com.falsepattern.chunk.api.DataManager;
 import com.falsepattern.chunk.internal.DataRegistryImpl;
@@ -236,9 +242,38 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
             ebs.removeInvalidBlocks();
         }
         if (world.isRemote) {
+            createTileEntities(chunk, sections, mask);
             int x = chunk.xPosition << 4;
             int z = chunk.zPosition << 4;
             world.markBlockRangeForRenderUpdate(x, minY, z, x + 15, -1, z + 15);
+        }
+    }
+
+    /**
+     * Client side: creates the tile entities of the received deep sections, as vanilla does lazily and Angelica eagerly
+     * for Y >= 0 at the end of {@code Chunk.fillChunk}. Angelica's chunk meshing reads tile entities from a snapshot
+     * and
+     * forbids creating them on its worker threads, so a deep tile entity that is not created here is never rendered.
+     */
+    private static void createTileEntities(Chunk chunk, ExtendedBlockStorage[] sections, int mask) {
+        for (int slot = 0; slot < sections.length; slot++) {
+            ExtendedBlockStorage ebs = sections[slot];
+            if ((mask & 1 << slot) == 0 || ebs == null || ebs.isEmpty()) continue;
+            int baseY = (slot - DeepConstants.MAX_DEEP_SECTIONS) << 4;
+            for (int y = 0; y < 16; y++) for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++) {
+                Block block = ebs.getBlockByExtId(x, y, z);
+                int meta = ebs.getExtBlockMetadata(x, y, z);
+                if (block == Blocks.air || !block.hasTileEntity(meta)) continue;
+                TileEntity existing = (TileEntity) chunk.chunkTileEntityMap.get(new ChunkPosition(x, baseY + y, z));
+                if (existing != null && !existing.isInvalid()) continue;
+                TileEntity te = block.createTileEntity(chunk.worldObj, meta);
+                if (te == null) continue;
+                te.xCoord = (chunk.xPosition << 4) + x;
+                te.yCoord = baseY + y;
+                te.zCoord = (chunk.zPosition << 4) + z;
+                if (Compat.angelica) AngelicaTiles.awaitDescriptor(te);
+                chunk.addTileEntity(te);
+            }
         }
     }
 }

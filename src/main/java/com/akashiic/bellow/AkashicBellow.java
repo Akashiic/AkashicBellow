@@ -60,14 +60,17 @@ public class AkashicBellow {
             .bus()
             .register(this);
         if (event.getSide()
-            .isClient())
+            .isClient()) {
             FMLCommonHandler.instance()
                 .bus()
                 .register(new ClientEvents());
+            if (Boolean.getBoolean("akashicbellow.clienttest")) com.akashiic.bellow.client.ClientSelfTest.register();
+        }
     }
 
     @Mod.EventHandler
     public void init(FMLInitializationEvent event) {
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(new WorldEvents());
         // Registered after EndlessIDs (dependency ordering), so the per-section packet budget already accounts for it.
         DataRegistry.registerDataManager(new DeepDataManager());
     }

@@ -15,7 +15,8 @@ import com.llamalad7.mixinextras.sugar.Local;
 
 /**
  * Light lookups of the vanilla chunk mesher. Both methods start with
- * {@code if (y < 0) y = 0; if (y >= 256) y = 255; if (y >= 0 && y < 256 && ...)}.
+ * {@code if (y < 0) y = 0; if (y >= 256) y = 255; if (y >= 0 && y < 256 && ...)}. Both tests compile to the same
+ * {@code iflt} jump, so the expression {@code y < 0} matches twice per method; the clamp value is the third target.
  */
 @Mixin(value = ChunkCache.class, priority = 1100)
 public abstract class MixinChunkCache_DeepClient {
@@ -29,8 +30,8 @@ public abstract class MixinChunkCache_DeepClient {
         method = { "getSkyBlockTypeBrightness(Lnet/minecraft/world/EnumSkyBlock;III)I",
             "getSpecialBlockBrightness(Lnet/minecraft/world/EnumSkyBlock;III)I" },
         at = @At("MIXINEXTRAS:EXPRESSION"),
-        require = 2,
-        allow = 2)
+        require = 4,
+        allow = 4)
     private boolean bellow$below(boolean original, @Local(argsOnly = true, ordinal = 1) int y) {
         return y < BellowAPI.getMinY(this.worldObj);
     }
@@ -45,17 +46,5 @@ public abstract class MixinChunkCache_DeepClient {
         allow = 2)
     private int bellow$clamp(int zero) {
         return BellowAPI.getMinY(this.worldObj);
-    }
-
-    @Definition(id = "y", local = @Local(type = int.class, argsOnly = true, ordinal = 1))
-    @Expression("y >= 0")
-    @ModifyExpressionValue(
-        method = { "getSkyBlockTypeBrightness(Lnet/minecraft/world/EnumSkyBlock;III)I",
-            "getSpecialBlockBrightness(Lnet/minecraft/world/EnumSkyBlock;III)I" },
-        at = @At("MIXINEXTRAS:EXPRESSION"),
-        require = 2,
-        allow = 2)
-    private boolean bellow$atLeast(boolean original, @Local(argsOnly = true, ordinal = 1) int y) {
-        return y >= BellowAPI.getMinY(this.worldObj);
     }
 }

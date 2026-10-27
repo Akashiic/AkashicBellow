@@ -38,7 +38,13 @@ public abstract class MixinWorldServer_DeepTicks extends World {
         super((ISaveHandler) null, null, (WorldSettings) null, (WorldProvider) null, (Profiler) null);
     }
 
-    @Inject(method = "func_147456_g()V", at = @At("TAIL"), require = 1)
+    // Right after super.func_147456_g() (which rebuilds activeChunkSet): Crucible/Spigot clears the set at the end
+    // of the method, so TAIL would see it empty there.
+    @Inject(
+        method = "func_147456_g()V",
+        at = @At(value = "INVOKE", target = "Lnet/minecraft/world/World;func_147456_g()V", shift = At.Shift.AFTER),
+        require = 1,
+        allow = 1)
     private void bellow$tickDeepSections(CallbackInfo ci) {
         int floor = BellowAPI.getMinY(this);
         if (floor >= 0) return;

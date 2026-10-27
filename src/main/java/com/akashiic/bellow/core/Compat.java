@@ -6,5 +6,8 @@ public final class Compat {
     /** ArchaicFix's Phosphor mixins are applied (its lighting engine owns World light updates). */
     public static boolean phosphor;
 
+    /** Client with Angelica's Celeritas renderer (set by the late mixin loader). */
+    public static boolean angelica;
+
     private Compat() {}
 }

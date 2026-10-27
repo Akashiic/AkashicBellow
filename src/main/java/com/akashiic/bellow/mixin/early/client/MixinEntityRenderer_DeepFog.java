@@ -1,0 +1,34 @@
+package com.akashiic.bellow.mixin.early.client;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.EntityRenderer;
+
+import org.spongepowered.asm.mixin.Final;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
+
+import com.akashiic.bellow.api.BellowAPI;
+
+/** The fog/sky colour fades to black near the bottom of the world: measure that from the floor, not from Y 0. */
+@Mixin(value = EntityRenderer.class, priority = 1100)
+public abstract class MixinEntityRenderer_DeepFog {
+
+    @Shadow
+    @Final
+    private Minecraft mc;
+
+    // double d0 = interpolatedY * provider.getVoidFogYFactor(); (first double local of the method)
+    @ModifyVariable(
+        method = "updateFogColor(F)V",
+        at = @At(value = "STORE", ordinal = 0),
+        ordinal = 0,
+        require = 1,
+        allow = 1)
+    private double bellow$voidFromFloor(double d0) {
+        if (this.mc.theWorld == null) return d0;
+        int floor = BellowAPI.getMinY(this.mc.theWorld);
+        return floor == 0 ? d0 : d0 - floor * this.mc.theWorld.provider.getVoidFogYFactor();
+    }
+}

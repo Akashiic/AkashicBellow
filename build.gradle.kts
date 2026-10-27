@@ -13,3 +13,13 @@ if (project.findProperty("bellow.selftest") == "true") {
         }
     }
 }
+
+// Headless client verification (needs a display, e.g. xvfb-run): ./gradlew runClient21 -Pbellow.clienttest=true
+if (project.findProperty("bellow.clienttest") == "true") {
+    tasks.withType<JavaExec>().configureEach {
+        if (name.startsWith("runClient")) {
+            systemProperty("akashicbellow.clienttest", "true")
+            systemProperty("fml.queryResult", "confirm")
+        }
+    }
+}

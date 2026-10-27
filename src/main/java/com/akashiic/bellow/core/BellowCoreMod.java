@@ -37,7 +37,6 @@ public class BellowCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
         Compat.phosphor = EnvironmentDetector.isPhosphorActive(loadedCoreMods);
         if (Compat.phosphor) {
             mixins.add("common.MixinChunk_DeepLightPhosphor");
-            mixins.add("common.MixinWorld_DeepPhosphor");
         } else {
             mixins.add("common.MixinChunk_DeepLightVanilla");
         }
@@ -63,6 +62,12 @@ public class BellowCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
             .isClient()) {
             mixins.add("client.MixinWorld_DeepClient");
             mixins.add("client.MixinChunkCache_DeepClient");
+            mixins.add("client.MixinEntityRenderer_DeepFog");
+            mixins.add("client.MixinWorldClient_DeepParticles");
+            // Angelica (Celeritas) replaces terrain rendering; it gets its own late compat mixins.
+            if (!EnvironmentDetector.classExists("com.gtnewhorizons.angelica.AngelicaMod")) {
+                mixins.add("client.MixinRenderGlobal_Deep");
+            }
         }
         return mixins;
     }

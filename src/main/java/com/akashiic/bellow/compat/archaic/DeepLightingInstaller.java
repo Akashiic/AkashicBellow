@@ -27,6 +27,7 @@ public final class DeepLightingInstaller {
     private DeepLightingInstaller() {}
 
     public static synchronized void install(World world) {
+        AkashicBellow.LOG.debug("Deep lighting install requested for {} (minY {})", world, BellowAPI.getMinY(world));
         if (BellowAPI.getMinY(world) >= 0) return;
         try {
             if (worldEngine == null) {
@@ -57,7 +58,10 @@ public final class DeepLightingInstaller {
         if (provider != null && "net.minecraft.client.multiplayer.ChunkProviderClient".equals(
             provider.getClass()
                 .getName())) {
-            return (List<Chunk>) fieldOfType(provider.getClass(), List.class).get(provider);
+            // Hodgepodge removes this list (null). Stale per-chunk caches are harmless: the old engine's queues are
+            // drained before the swap and ArchaicFix only schedules Y >= 0 updates through them.
+            List<Chunk> list = (List<Chunk>) fieldOfType(provider.getClass(), List.class).get(provider);
+            if (list != null) return list;
         }
         return java.util.Collections.emptyList();
     }

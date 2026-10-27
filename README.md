@@ -1,0 +1,77 @@
+# Akashic Bellow
+
+Camadas negativas do mundo (Y < 0) para **Minecraft 1.7.10** (Forge 10.13.4.1614), no estilo 1.18+:
+deepslate, piso de bedrock em gradiente, minérios de deepslate com as distribuições da 1.18/1.20
+e retrogen para mundos que já existem.
+
+Status: **beta** (`0.1.0-beta.1`). Veja os riscos abertos em [docs/DESIGN.md §11](docs/DESIGN.md#11-riscos-abertos-beta).
+
+## O que faz
+
+* Estende o mundo para baixo até um piso fixo por dimensão (padrão **−64**, configurável de −16 a **−512**).
+  O teto continua 256 e nada acima de Y 0 muda de forma.
+* Gera o subsolo em chunks novos **e** em chunks salvos antes da instalação (retrogen no carregamento do chunk).
+* Com Et Futurum Requiem: deepslate, tufo, cobre e as variantes deepslate dos minérios (inclusive de outros mods
+  registrados no `DeepslateOreRegistry` do EFR). Sem EFR: pedra e minérios comuns.
+* Minérios gerados pelo porte linha a linha do `OreFeature` da 1.18 com as alturas/contagens da 1.20.1.
+
+O desenho, as decisões e o motivo de não usar CubicChunks estão em [docs/DESIGN.md](docs/DESIGN.md).
+
+## Requisitos
+
+| | versão |
+|---|---|
+| Forge | 10.13.4.1614 |
+| UniMixins | 0.3.1+ (Mixin 0.8.7, MixinExtras 0.5) |
+| GTNHLib | 0.11.40+ (TEOF 4.1 usa 0.11.51) |
+| ChunkAPI | 0.8.4+ (obrigatório) |
+
+Opcionais com integração: Et Futurum Requiem, EndlessIDs, ArchaicFix (Phosphor), Hodgepodge, Angelica.
+O mod é obrigatório **no servidor e no cliente**.
+
+## Configuração (`config/akashicbellow.cfg`)
+
+| opção | padrão | |
+|---|---|---|
+| `general.minY` | −64 | piso (múltiplo de 16). **Travado por mundo** no primeiro uso em `<mundo>/akashicbellow.dat` |
+| `general.dimensions` | `0` | dimensões com camada profunda |
+| `general.spawnMobsInDeep` | true | spawn natural também abaixo de 0 |
+| `worldgen.enabled` | true | gerar o subsolo |
+| `worldgen.retrogen` | true | preencher chunks antigos |
+| `worldgen.replaceLegacyBedrock` / `legacyBedrockMaxY` | true / 4 | trocar a bedrock antiga (Y 0..4) pelo bloco profundo |
+| `worldgen.deepBlock` | `auto` | bloco de preenchimento (`auto` = deepslate do EFR ou pedra) |
+| `worldgen.ores` | true | minérios, tufo e cascalho abaixo de 0 |
+| `worldgen.scaleBottomAnchoredCounts` | true | para pisos abaixo de −64, manter a densidade por volume |
+| `worldgen.oreCountMultiplier` | 1.0 | multiplicador global das contagens |
+
+## Instalação num servidor existente
+
+1. **Backup do mundo.**
+2. Instale o jar no servidor e em todos os clientes; ajuste `minY` antes do primeiro boot (depois ele fica travado).
+3. Os chunks antigos recebem o subsolo à medida que são carregados (não há pré-geração; um pré-gerador comum
+   que carregue os chunks também dispara o retrogen). `/bellow info` mostra o piso e o estado de geração do chunk atual,
+   `/bellow stats [raio]` o histograma dos blocos abaixo de 0.
+
+Comandos (op): `/bellow info`, `/bellow stats [raio]`, `/bellow selftest`.
+
+Desinstalar: o mundo continua abrindo, mas tudo abaixo de Y 0 é perdido.
+
+## Compilar e testar
+
+```bash
+./gradlew build                      # jar em build/libs (defina VERSION=... se não houver tag git)
+./gradlew test                       # testes unitários
+tools/selftest.sh                    # servidor, 3 fases (cria → gera/verifica → relê do disco numa JVM nova)
+tools/selftest.sh -Pbellow.compatRun=true          # idem com EFR + EndlessIDs + ArchaicFix + Hodgepodge
+tools/clienttest.sh                                # cliente headless (xvfb), renderer vanilla
+tools/clienttest.sh -Pbellow.compatRun=true -Pbellow.angelica=true   # cliente com Angelica
+```
+
+O teste de cliente precisa de `xvfb-run` e EGL/Mesa (`libegl1 libegl-mesa0 libgles2`).
+Os relatórios ficam em `run/server/akashicbellow-selftest-*.txt` e `run/client/akashicbellow-clienttest.txt`;
+os screenshots em `run/client/screenshots/`.
+
+## API
+
+`com.akashiic.bellow.api.BellowAPI`: `getMinY(world)`, `hasDeepLayers(world)`, `getDeepSection(chunk, sectionY)`,
+para mods que iteram seções diretamente e querem enxergar o subsolo.

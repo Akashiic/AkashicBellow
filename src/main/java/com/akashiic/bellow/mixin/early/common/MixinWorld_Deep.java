@@ -9,6 +9,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import com.akashiic.bellow.api.IDeepWorld;
 import com.akashiic.bellow.compat.archaic.DeepLightingInstaller;
 import com.akashiic.bellow.core.Compat;
+import com.akashiic.bellow.world.ClientFloors;
 import com.akashiic.bellow.world.DeepWorlds;
 import com.llamalad7.mixinextras.expression.Definition;
 import com.llamalad7.mixinextras.expression.Expression;
@@ -44,7 +45,9 @@ public abstract class MixinWorld_Deep implements IDeepWorld {
 
     @Override
     public void bellow$setMinY(int minY) {
+        int old = this.bellow$minY;
         this.bellow$minY = minY;
+        if (old != minY && ((World) (Object) this).isRemote) ClientFloors.markRendererDirty();
         if (minY < 0 && Compat.phosphor) DeepLightingInstaller.install((World) (Object) this);
     }
 

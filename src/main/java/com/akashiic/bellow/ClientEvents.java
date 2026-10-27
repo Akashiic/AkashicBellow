@@ -19,9 +19,11 @@ public final class ClientEvents {
         World world = Minecraft.getMinecraft().theWorld;
         if (world == null) return;
         Integer announced = ClientFloors.get(world.provider.dimensionId);
-        if (announced == null) return;
         IDeepWorld deep = (IDeepWorld) world;
-        if (deep.bellow$getMinY() != announced) deep.bellow$setMinY(announced);
+        if (announced != null && deep.bellow$getMinY() != announced) deep.bellow$setMinY(announced);
+        if (ClientFloors.consumeRendererDirty() && Minecraft.getMinecraft().renderGlobal != null) {
+            Minecraft.getMinecraft().renderGlobal.loadRenderers();
+        }
     }
 
     @SubscribeEvent

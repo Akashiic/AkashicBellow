@@ -297,7 +297,10 @@ public final class CompatProbe {
                 || net.minecraft.entity.projectile.EntityFireball.class.isAssignableFrom(c)
                 || net.minecraft.entity.EntityHanging.class.isAssignableFrom(c)
                 // Fake players join world.playerEntities, where other mods expect real connections (OpenBlocks).
-                || EntityPlayer.class.isAssignableFrom(c)) continue;
+                || EntityPlayer.class.isAssignableFrom(c)
+                // Registered with tracking frequency 0: only ever exists in flight (Witchery brews); the vanilla
+                // tracker divides by it.
+                || !trackable(c)) continue;
             int x = this.ox + 2 + (i % 32) * 6, z = z0 + 2 + (i / 32) * 6;
             Entity deep = this.spawnBoxed(e.getKey(), x, this.deepY, z);
             Entity control = this.spawnBoxed(e.getKey(), x, CONTROL_Y, z);
@@ -359,6 +362,14 @@ public final class CompatProbe {
             return t.getClass()
                 .getName();
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean trackable(Class<?> c) {
+        cpw.mods.fml.common.registry.EntityRegistry.EntityRegistration reg = cpw.mods.fml.common.registry.EntityRegistry
+            .instance()
+            .lookupModSpawn((Class<? extends Entity>) c, false);
+        return reg == null || reg.getUpdateFrequency() > 0;
     }
 
     /** Constructor {@code (World, double, double, double, SomeEnum)} with the enum's first constant, if any. */

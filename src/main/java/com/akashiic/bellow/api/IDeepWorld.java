@@ -9,7 +9,4 @@ package com.akashiic.bellow.api;
 public interface IDeepWorld {
 
     int bellow$getMinY();
-
-    /** Client side only: the server announces the floor of the dimension. */
-    void bellow$setMinY(int minY);
 }

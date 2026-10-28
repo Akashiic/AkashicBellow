@@ -41,4 +41,16 @@ public class GenConfig {
     @Config.DefaultDouble(1.0)
     @Config.RangeDouble(min = 0.0, max = 16.0)
     public static double oreCountMultiplier;
+
+    @Config.Comment({ "Time per world tick for the deep stages that run after the world tick: the light of what deep",
+        "generators placed and their onDecorated/onLit callbacks. What does not fit waits for the next tick." })
+    @Config.DefaultInt(10)
+    @Config.RangeInt(min = 1, max = 1000)
+    public static int stageBudgetMillis;
+
+    @Config.Comment({
+        "Debugging deep generators: refuse (and log) World writes that their contract forbids while their",
+        "terrain or decoration step runs. Off in normal play." })
+    @Config.DefaultBoolean(false)
+    public static boolean strictGenerators;
 }

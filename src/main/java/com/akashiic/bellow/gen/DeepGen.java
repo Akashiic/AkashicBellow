@@ -8,6 +8,7 @@ import com.akashiic.bellow.GenConfig;
 import com.akashiic.bellow.api.BellowAPI;
 import com.akashiic.bellow.api.DeepConstants;
 import com.akashiic.bellow.api.IDeepChunk;
+import com.akashiic.bellow.storage.IDeepChunkInternal;
 
 /**
  * Entry point of deep generation, called from {@code Chunk.onChunkLoad} on the server. That method runs for every
@@ -34,7 +35,7 @@ public final class DeepGen {
             DeepTerrain.fill(chunk, minY, world.getSeed());
             // deep generators carve the freshly filled layer, before any ore of the 3x3 stage (1.18: carvers first)
             DeepGenerators.generateTerrain(chunk, minY, world.getSeed(), retrogen);
-            deep.bellow$setGenState(DeepConstants.GEN_TERRAIN);
+            ((IDeepChunkInternal) chunk).bellow$setGenState(DeepConstants.GEN_TERRAIN);
         }
     }
 
@@ -47,7 +48,12 @@ public final class DeepGen {
         World world = chunk.worldObj;
         if (world == null || world.isRemote || !(world instanceof WorldServer) || !GenConfig.enabled) return;
         int minY = BellowAPI.getMinY(world);
-        if (minY >= 0 || ((IDeepChunk) chunk).bellow$getGenState() == DeepConstants.GEN_NONE) return;
+        byte state = ((IDeepChunk) chunk).bellow$getGenState();
+        if (minY >= 0 || state == DeepConstants.GEN_NONE) return;
+        // a decorated chunk may complete the 5x5 a neighbour's light stage waits for, or have a stage of its own due
+        if (state >= DeepConstants.GEN_DECORATED && DeepGenerators.anyFor(world)) {
+            DeepStages.queue((WorldServer) world, chunk);
+        }
         DeepDecorator.tryAround((WorldServer) world, chunk, minY);
     }
 }

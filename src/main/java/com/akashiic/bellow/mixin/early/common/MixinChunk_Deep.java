@@ -2,6 +2,7 @@ package com.akashiic.bellow.mixin.early.common;
 
 import net.minecraft.block.Block;
 import net.minecraft.init.Blocks;
+import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
 import net.minecraft.world.EnumSkyBlock;
 import net.minecraft.world.World;
@@ -20,6 +21,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import com.akashiic.bellow.api.DeepConstants;
 import com.akashiic.bellow.api.IDeepChunk;
 import com.akashiic.bellow.api.IDeepWorld;
+import com.akashiic.bellow.storage.DeepDataManager;
+import com.akashiic.bellow.storage.IDeepChunkInternal;
 import com.akashiic.bellow.storage.IDormantData;
 
 /**
@@ -31,7 +34,7 @@ import com.akashiic.bellow.storage.IDormantData;
  * the heightmap of a column is never below 0, so deep writes never touch skylight bookkeeping.
  */
 @Mixin(value = Chunk.class, priority = 1100)
-public abstract class MixinChunk_Deep implements IDeepChunk, IDormantData {
+public abstract class MixinChunk_Deep implements IDeepChunk, IDeepChunkInternal, IDormantData {
 
     @Shadow
     public World worldObj;
@@ -44,6 +47,12 @@ public abstract class MixinChunk_Deep implements IDeepChunk, IDormantData {
 
     @Unique
     private boolean bellow$fromDisk;
+
+    @Unique
+    private boolean bellow$lightPending;
+
+    @Unique
+    private NBTTagCompound bellow$generators;
 
     @Unique
     private NBTTagList bellow$dormantTiles;
@@ -69,7 +78,7 @@ public abstract class MixinChunk_Deep implements IDeepChunk, IDormantData {
         this.bellow$dormantEntities = entities;
     }
 
-    // ---------------------------------------------------------------- IDeepChunk
+    // ---------------------------------------------------------------- IDeepChunk, IDeepChunkInternal
 
     @Override
     public ExtendedBlockStorage[] bellow$getDeepSections() {
@@ -112,6 +121,26 @@ public abstract class MixinChunk_Deep implements IDeepChunk, IDormantData {
     @Override
     public void bellow$setFromDisk(boolean fromDisk) {
         this.bellow$fromDisk = fromDisk;
+    }
+
+    @Override
+    public boolean bellow$isLightPending() {
+        return this.bellow$lightPending;
+    }
+
+    @Override
+    public void bellow$setLightPending(boolean pending) {
+        this.bellow$lightPending = pending;
+    }
+
+    @Override
+    public NBTTagCompound bellow$getGeneratorRecords() {
+        return this.bellow$generators;
+    }
+
+    @Override
+    public void bellow$setGeneratorRecords(NBTTagCompound records) {
+        this.bellow$generators = records;
     }
 
     // ---------------------------------------------------------------- section lookup
@@ -164,18 +193,28 @@ public abstract class MixinChunk_Deep implements IDeepChunk, IDormantData {
     /*
      * Section creation. Vanilla does 'ebs = storageArrays[y >> 4] = new ExtendedBlockStorage(...)' when the section is
      * missing; that store cannot be redirected (DUP_X2 idiom) and a negative index would throw. Creating the deep
-     * section up front means the vanilla creation branch is never taken below Y 0. A new deep section has no skylight,
-     * which is correct: the heightmap never goes below 0, so no column sees the sky below Y 0.
+     * section up front means the vanilla creation branch is never taken below Y 0; where no section may exist (below
+     * the floor, or a chunk whose deep data is of a newer format and read-only) the call is cancelled instead, as
+     * World does for those positions. A new deep section has no skylight, which is correct: the heightmap never goes
+     * below 0, so no column sees the sky below Y 0.
      */
-    @Inject(method = "func_150807_a(IIILnet/minecraft/block/Block;I)Z", at = @At("HEAD"), require = 1)
+    @Inject(
+        method = "func_150807_a(IIILnet/minecraft/block/Block;I)Z",
+        at = @At("HEAD"),
+        cancellable = true,
+        require = 1)
     private void bellow$prepareForBlock(int x, int y, int z, Block block, int meta,
         CallbackInfoReturnable<Boolean> cir) {
-        if (y < 0 && block != Blocks.air) this.bellow$ensureDeepSection(y);
+        if (y < 0 && block != Blocks.air && !this.bellow$ensureDeepSection(y)) cir.setReturnValue(false);
     }
 
-    @Inject(method = "setLightValue(Lnet/minecraft/world/EnumSkyBlock;IIII)V", at = @At("HEAD"), require = 1)
+    @Inject(
+        method = "setLightValue(Lnet/minecraft/world/EnumSkyBlock;IIII)V",
+        at = @At("HEAD"),
+        cancellable = true,
+        require = 1)
     private void bellow$prepareForLight(EnumSkyBlock type, int x, int y, int z, int value, CallbackInfo ci) {
-        if (y < 0) this.bellow$ensureDeepSection(y);
+        if (y < 0 && !this.bellow$ensureDeepSection(y)) ci.cancel();
     }
 
     /**
@@ -189,13 +228,17 @@ public abstract class MixinChunk_Deep implements IDeepChunk, IDormantData {
         if (y < 0 && this.bellow$deepGet(y >> 4) == null) cir.setReturnValue(0);
     }
 
+    /** Whether the deep section of {@code y} exists now (created if it may). */
     @Unique
-    private void bellow$ensureDeepSection(int y) {
+    private boolean bellow$ensureDeepSection(int y) {
         int sectionY = y >> 4;
         int slot = sectionY + DeepConstants.MAX_DEEP_SECTIONS;
-        if (slot < 0 || y < ((IDeepWorld) this.worldObj).bellow$getMinY()) return;
+        if (slot < 0 || y < ((IDeepWorld) this.worldObj).bellow$getMinY()) return false;
+        // deep data of a newer format is read-only: a section created here would be dropped on save (and sent)
+        if (DeepDataManager.isNewer((Chunk) (Object) this)) return false;
         ExtendedBlockStorage[] deep = this.bellow$getDeepSections();
         if (deep[slot] == null) deep[slot] = new ExtendedBlockStorage(sectionY << 4, !this.worldObj.provider.hasNoSky);
+        return true;
     }
 
     /**

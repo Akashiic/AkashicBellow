@@ -1,5 +1,6 @@
 package com.akashiic.bellow.gen;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -19,6 +20,7 @@ import com.akashiic.bellow.api.IDeepChunk;
 import com.akashiic.bellow.gen.ore.DeepFeature;
 import com.akashiic.bellow.gen.ore.DeepFeatures;
 import com.akashiic.bellow.gen.ore.OreFeature;
+import com.akashiic.bellow.storage.IDeepChunkInternal;
 
 import cpw.mods.fml.common.registry.GameRegistry;
 
@@ -67,12 +69,55 @@ public final class DeepDecorator {
         features = out;
     }
 
+    /** Self test only: the ore step fails after placing its veins. */
+    public static boolean failOresForTests;
+
+    /** Decorations running now (main thread): more than 0 while one runs, and a chunk it loads would nest another. */
+    private static int depth;
+    /** Chunk loads that happened during a decoration, tried once it ends. */
+    private static final ArrayDeque<Chunk> deferred = new ArrayDeque<>();
+
     /**
      * Try every chunk whose 3x3 neighbourhood may have just been completed by {@code loaded}. The stage runs when there
      * is something to place: ores, or a registered deep generator.
+     * <p>
+     * Not reentrant: a chunk loaded from inside a decoration (a generator reading the World past its region) is only
+     * queued, and its neighbourhoods are tried when the outer decoration has finished. Decorations never nest, so
+     * neither does the stack depth they add to a chunk load.
      */
     public static void tryAround(WorldServer world, Chunk loaded, int minY) {
         if (!GenConfig.ores && !DeepGenerators.any()) return;
+        if (depth > 0) {
+            deferred.add(loaded);
+            return;
+        }
+        depth++;
+        try {
+            around(world, loaded, minY);
+            Chunk next;
+            while ((next = deferred.poll()) != null) {
+                WorldServer w = (WorldServer) next.worldObj;
+                // still the loaded chunk of its position (it may have been unloaded since)
+                if (!w.getChunkProvider()
+                    .chunkExists(next.xPosition, next.zPosition)
+                    || w.getChunkProvider()
+                        .provideChunk(next.xPosition, next.zPosition) != next)
+                    continue;
+                around(w, next, BellowAPI.getMinY(w));
+            }
+        } finally {
+            depth--;
+            // only left over when a fatal error unwinds from a decoration
+            if (depth == 0) deferred.clear();
+        }
+    }
+
+    /** Whether a decoration is running (the self test checks that nested loads are deferred). */
+    public static boolean decorating() {
+        return depth > 0;
+    }
+
+    private static void around(WorldServer world, Chunk loaded, int minY) {
         for (int dz = -1; dz <= 1; dz++) {
             for (int dx = -1; dx <= 1; dx++) {
                 tryDecorate(world, loaded, loaded.xPosition + dx, loaded.zPosition + dz, minY);
@@ -97,34 +142,40 @@ public final class DeepDecorator {
                 region[(dz + 1) * 3 + dx + 1] = c;
             }
         }
-        // claimed before decorating: a chunk load from inside the stage (a generator using the World) that completes
-        // this neighbourhood again must not decorate it a second time
-        ((IDeepChunk) centre).bellow$setGenState(DeepConstants.GEN_DECORATED);
+        DeepRegion view = new DeepRegion(world, world.getSeed(), region, cx, cz, minY);
+        // claimed before decorating: a chunk load from inside the stage that completes this neighbourhood again must
+        // not
+        // decorate it a second time. The claim stands whatever happens below (a retry would place the same veins twice)
+        ((IDeepChunkInternal) centre).bellow$setGenState(DeepConstants.GEN_DECORATED);
+        boolean generators = DeepGenerators.anyFor(world);
         try {
-            decorate(world, region, cx, cz, minY);
-        } catch (RuntimeException e) {
-            // the claim stands (a retry would place the same veins twice); what was placed is kept and the chunk
-            // loads normally instead of failing the chunk load
-            AkashicBellow.LOG.error("Deep decoration of chunk [{}, {}] failed; keeping what was placed", cx, cz, e);
-        }
-        centre.setChunkModified();
-        DeepGenerators.onDecorated(world, centre);
-    }
-
-    static void decorate(WorldServer world, Chunk[] region, int cx, int cz, int minY) {
-        long seed = world.getSeed();
-        DeepRegion view = new DeepRegion(world, seed, region, cx, cz, minY);
-        if (GenConfig.ores) placeFeatures(world, view, seed, cx, cz, minY);
-
-        // after the ores, like 1.18 features after its ore features; their writes are sent with the ores'
-        DeepGenerators.decorate(view, region[4]);
-
-        for (int i = 0; i < 9; i++) {
-            int slots = view.touchedSlots(i);
-            if (slots == 0) continue;
-            Chunk c = view.chunk(i);
-            c.setChunkModified();
-            BellowAPI.resendDeepSections(world, c, slots);
+            if (GenConfig.ores) {
+                try {
+                    placeFeatures(world, view, world.getSeed(), cx, cz, minY);
+                    if (failOresForTests) throw new IllegalStateException("self test: ore step failure");
+                } catch (Throwable e) {
+                    DeepGenerators.rethrowFatal(e);
+                    // what was placed is kept, the generators still run, the chunk loads normally
+                    AkashicBellow.LOG.error("Deep ores of chunk [{}, {}] failed; keeping what was placed", cx, cz, e);
+                }
+            }
+            // after the ores, like 1.18 features after its ore features; their writes are sent with the ores'
+            DeepGenerators.decorate(view, centre);
+        } finally {
+            // whatever was written is saved and sent, even when a step failed
+            centre.setChunkModified();
+            for (int i = 0; i < 9; i++) {
+                int slots = view.touchedSlots(i);
+                if (slots == 0) continue;
+                Chunk c = view.chunk(i);
+                c.setChunkModified();
+                DeepStages.resend(world, c, slots);
+            }
+            if (generators) {
+                // what generators placed is lit once the chunks around are decorated too (see DeepStages)
+                ((IDeepChunkInternal) centre).bellow$setLightPending(true);
+                DeepStages.queue(world, centre);
+            }
         }
     }
 

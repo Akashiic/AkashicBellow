@@ -1,5 +1,7 @@
 package com.akashiic.bellow.gen;
 
+import java.util.Random;
+
 import net.minecraft.block.Block;
 import net.minecraft.block.material.Material;
 import net.minecraft.tileentity.TileEntity;
@@ -12,6 +14,8 @@ import com.akashiic.bellow.api.DeepConstants;
 import com.akashiic.bellow.api.IDeepChunk;
 import com.akashiic.bellow.api.IDeepRegion;
 import com.akashiic.bellow.gen.ore.OreFeature;
+import com.akashiic.bellow.storage.DeepDataManager;
+import com.akashiic.bellow.storage.IDeepChunkInternal;
 
 /**
  * 3x3 chunks around the chunk being decorated, for Bellow's ores and for deep generators ({@link IDeepRegion}). Writes
@@ -28,6 +32,10 @@ final class DeepRegion implements OreFeature.World, IDeepRegion {
     private final int originChunkZ;
     private final int minY;
     private final int[] touchedSlots = new int[9];
+    /** False for a chunk whose deep data is of a newer format: read-only, a write would be dropped on save. */
+    private final boolean[] writable = new boolean[9];
+    /** Generation state of each chunk when the decoration started (the centre: terrain). */
+    private final byte[] states = new byte[9];
 
     private Block[] targetBlocks = new Block[2];
     private int[] targetMetas = new int[2];
@@ -40,6 +48,10 @@ final class DeepRegion implements OreFeature.World, IDeepRegion {
         this.originChunkX = originChunkX;
         this.originChunkZ = originChunkZ;
         this.minY = minY;
+        for (int i = 0; i < 9; i++) {
+            this.writable[i] = !DeepDataManager.isNewer(chunks[i]);
+            this.states[i] = ((IDeepChunk) chunks[i]).bellow$getGenState();
+        }
     }
 
     /** Ore: target 0 replaces stone, target 1 replaces deepslate/tuff. */
@@ -58,12 +70,23 @@ final class DeepRegion implements OreFeature.World, IDeepRegion {
         this.targetMetas[0] = meta;
     }
 
-    @Override
-    public Chunk chunkAt(int x, int z) {
+    /** Index of the chunk holding column (x, z) in the 3x3, -1 outside. */
+    private int indexAt(int x, int z) {
         int dx = (x >> 4) - this.originChunkX + 1;
         int dz = (z >> 4) - this.originChunkZ + 1;
-        if (dx < 0 || dx > 2 || dz < 0 || dz > 2) return null;
-        return this.chunks[dz * 3 + dx];
+        return dx < 0 || dx > 2 || dz < 0 || dz > 2 ? -1 : dz * 3 + dx;
+    }
+
+    @Override
+    public Chunk chunkAt(int x, int z) {
+        int i = this.indexAt(x, z);
+        return i < 0 ? null : this.chunks[i];
+    }
+
+    @Override
+    public byte genStateAt(int x, int z) {
+        int i = this.indexAt(x, z);
+        return i < 0 ? -1 : this.states[i];
     }
 
     int touchedSlots(int index) {
@@ -81,8 +104,8 @@ final class DeepRegion implements OreFeature.World, IDeepRegion {
     @Override
     public boolean canWrite(int x, int y, int z) {
         if (y < this.minY || y >= 0) return false;
-        Chunk c = this.chunkAt(x, z);
-        return c != null && this.section(c, y) != null;
+        int i = this.indexAt(x, z);
+        return i >= 0 && this.writable[i] && this.section(this.chunks[i], y) != null;
     }
 
     @Override
@@ -161,14 +184,15 @@ final class DeepRegion implements OreFeature.World, IDeepRegion {
     @Override
     public boolean setBlock(int x, int y, int z, Block block, int meta) {
         if (block == null || y < this.minY || y >= 0) return false;
-        Chunk c = this.chunkAt(x, z);
-        if (c == null) return false;
+        int i = this.indexAt(x, z);
+        if (i < 0 || !this.writable[i]) return false;
+        Chunk c = this.chunks[i];
         ExtendedBlockStorage ebs = this.section(c, y);
         if (ebs == null) {
             if (block.getMaterial() == Material.air) return true;
-            // a section that was all air when the chunk was saved is not stored
+            // a deep layer that was never filled there (generation was off when the chunk was made)
             int slot = DeepConstants.slot(y >> 4);
-            ebs = ((IDeepChunk) c).bellow$getDeepSections()[slot] = new ExtendedBlockStorage(
+            ebs = ((IDeepChunkInternal) c).bellow$getDeepSections()[slot] = new ExtendedBlockStorage(
                 y >> 4 << 4,
                 !this.world.provider.hasNoSky);
         }
@@ -181,6 +205,31 @@ final class DeepRegion implements OreFeature.World, IDeepRegion {
         if (block.hasTileEntity(meta)) this.world.getTileEntity(x, y, z);
         this.touched(x, y, z);
         return true;
+    }
+
+    @Override
+    public int placeOre(Random random, int x, int y, int z, int size, float discardOnAir, Block ore, int meta) {
+        checkFeature(ore, meta, size, discardOnAir);
+        DeepBlocks.BlockAndMeta deep = DeepBlocks.deepVariant(ore, meta);
+        this.useOre(ore, meta, deep.block, deep.meta);
+        return OreFeature.place(random, x, y, z, size, discardOnAir, this);
+    }
+
+    @Override
+    public int placeBlob(Random random, int x, int y, int z, int size, float discardOnAir, Block block, int meta) {
+        checkFeature(block, meta, size, discardOnAir);
+        this.useBlob(block, meta);
+        return OreFeature.place(random, x, y, z, size, discardOnAir, this);
+    }
+
+    /** Veins write straight into sections: no tile entities, no air (use setBlock), sizes of the 1.18 range. */
+    private static void checkFeature(Block block, int meta, int size, float discardOnAir) {
+        if (block == null || block.getMaterial() == Material.air || block.hasTileEntity(meta)) {
+            throw new IllegalArgumentException("Ore and blob blocks must be solid blocks without a tile entity");
+        }
+        if (size < 0 || size > 64 || !(discardOnAir >= 0.0F && discardOnAir <= 1.0F)) {
+            throw new IllegalArgumentException("Vein size must be 0..64 and discardOnAir 0..1");
+        }
     }
 
     @Override

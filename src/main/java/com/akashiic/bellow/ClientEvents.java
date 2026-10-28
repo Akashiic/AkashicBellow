@@ -5,6 +5,7 @@ import net.minecraft.world.World;
 
 import com.akashiic.bellow.api.IDeepWorld;
 import com.akashiic.bellow.world.ClientFloors;
+import com.akashiic.bellow.world.IDeepWorldInternal;
 
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.gameevent.TickEvent;
@@ -24,7 +25,8 @@ public final class ClientEvents {
         if (world == null) return;
         Integer announced = ClientFloors.get(world.provider.dimensionId);
         IDeepWorld deep = (IDeepWorld) world;
-        if (announced != null && deep.bellow$getMinY() != announced) deep.bellow$setMinY(announced);
+        if (announced != null && deep.bellow$getMinY() != announced)
+            ((IDeepWorldInternal) world).bellow$setMinY(announced);
         // A world that read its floor from ClientFloors when it was created (re-entering a dimension, or the floor
         // message before S01) never went through setMinY: give it the deep lighting engine here, once per world/floor.
         int minY = deep.bellow$getMinY();

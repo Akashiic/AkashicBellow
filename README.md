@@ -4,7 +4,7 @@ Camadas negativas do mundo (Y < 0) para **Minecraft 1.7.10** (Forge 10.13.4.1614
 deepslate, piso de bedrock em gradiente, minérios de deepslate com as distribuições da 1.18/1.20
 e retrogen para mundos que já existem.
 
-Status: **beta** (`0.1.0-beta.2`). Veja os riscos abertos em [docs/DESIGN.md §11](docs/DESIGN.md#11-riscos-abertos-beta).
+Status: **beta** (`0.1.0-beta.3`). Veja os riscos abertos em [docs/DESIGN.md §11](docs/DESIGN.md#11-riscos-abertos-beta).
 
 ## O que faz
 
@@ -82,7 +82,7 @@ Desinstalar: o mundo continua abrindo, mas tudo abaixo de Y 0 é perdido.
 
 Cada push no `main` roda o workflow **Build**, que gera do mesmo commit o mod e o agent do WorldEdit (companion) e
 publica os dois como artifacts do mesmo run, sem zip: `AkashicBellow-<versão>.jar` e
-`AkashicBellow-WorldEdit-6.1.9-<versão>-agent.jar`, com `<versão>` = `0.1.0-beta.2-<commit>`. O resumo do run lista o
+`AkashicBellow-WorldEdit-6.1.9-<versão>-agent.jar`, com `<versão>` = `0.1.0-beta.3-<commit>`. O resumo do run lista o
 SHA-256 de cada jar.
 
 ## Compilar e testar
@@ -111,18 +111,28 @@ os screenshots em `run/client/screenshots/`.
 
 ## API
 
-`com.akashiic.bellow.api.BellowAPI` (versão da API 2, em `BellowAPI.apiVersion()`):
+`com.akashiic.bellow.api.BellowAPI` (versão da API 3, em `BellowAPI.apiVersion()`):
 
 * Leitura: `getMinY(world)`, `hasDeepLayers(world)`, `getDeepSection(chunk, sectionY)`, para mods que iteram seções
-  diretamente e querem enxergar o subsolo.
-* **Geradores profundos** (cavernas, aquíferos, estruturas): `registerGenerator(id, IDeepGenerator)` até o postInit.
+  diretamente e querem enxergar o subsolo. `IDeepChunk`/`IDeepWorld` são somente leitura.
+* **Geradores profundos** (cavernas, aquíferos, estruturas): `registerGenerator(id, IDeepGenerator[, prioridade])`
+  até o postInit; ordem por prioridade e depois id, gravada por dimensão em `akashicbellow.dat` (aviso quando muda).
   O gerador recebe cada chunk novo logo depois do preenchimento e antes dos minérios (`generateTerrain`), a região
-  3×3 depois dos minérios (`decorate(IDeepRegion)`) e o chunk já marcado como decorado (`onDecorated`). Chunks cujo
-  subsolo foi gerado antes de o gerador ser instalado nunca são entregues a ele. Contrato completo no javadoc de
-  `IDeepGenerator` e em [docs/DESIGN.md §5.1](docs/DESIGN.md#51-geradores-profundos-api).
+  3×3 depois dos minérios (`decorate(IDeepRegion)`, com `setBlock`, `placeOre`, `placeBlob`, `genStateAt`), e,
+  depois do tick do mundo, o chunk decorado (`onDecorated`) e o chunk já iluminado pela etapa de luz do Bellow com o
+  5×5 em volta decorado (`onLit`). Cada etapa roda uma vez por chunk; o que ficou pendente (chunk descarregado,
+  servidor parado) roda na próxima carga. Chunks cujo subsolo foi gerado antes de o gerador ser instalado nunca são
+  entregues a ele. `appliesTo(world)` e `version()` opcionais. Contrato completo no javadoc de `IDeepGenerator` e em
+  [docs/DESIGN.md §5.1](docs/DESIGN.md#51-geradores-profundos-api).
+* Por chunk e por gerador: `getGeneratorStages(chunk, id)` (o que o gerador já fez ali) e `getGeneratorData(chunk,
+  id)` (NBT do gerador, salvo com o subsolo e mantido sem o addon); `isDecorated(chunk)`, `isLightPending(chunk)`.
+* Blocos do subsolo: `getFillBlock()`/`getFillMeta()`, `isDeepFill`, `isBaseStone`, `isDeepHost`.
 * `resendDeepSections(world, chunk, slotMask)`: reenvia seções escritas diretamente aos jogadores que já receberam o
   chunk.
+* Para testar um gerador: `worldgen.strictGenerators=true` recusa (e registra) escritas pelo `World` que o contrato
+  proíbe durante `generateTerrain`/`decorate`; num self-test sem ticks, `runDeepStages(world)` roda na hora as etapas
+  de depois do tick.
 
-Para depender da API, declare `required-after:akashicbellow` e confira `BellowAPI.apiVersion() >= 2` em tempo de
-execução, dentro de um `try`/`catch (NoSuchMethodError e)` (a API 1 não tem o método). Não compare a versão do mod:
+Para depender da API, declare `required-after:akashicbellow` e confira `BellowAPI.apiVersion() >= 3` (ou a versão de
+que precisa) em tempo de execução, dentro de um `try`/`catch (NoSuchMethodError e)` (a API 1 não tem o método). Não compare a versão do mod:
 os builds de CI levam o sufixo do commit.

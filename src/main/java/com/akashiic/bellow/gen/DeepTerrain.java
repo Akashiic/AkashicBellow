@@ -8,7 +8,7 @@ import net.minecraft.world.chunk.storage.ExtendedBlockStorage;
 
 import com.akashiic.bellow.GenConfig;
 import com.akashiic.bellow.api.DeepConstants;
-import com.akashiic.bellow.api.IDeepChunk;
+import com.akashiic.bellow.storage.IDeepChunkInternal;
 
 /**
  * TERRAIN stage: solid deep block from the floor up to Y -1 with the 1.18 bedrock floor, plus optional replacement of
@@ -44,7 +44,7 @@ public final class DeepTerrain {
 
     public static void fill(Chunk chunk, int minY, long seed) {
         boolean hasSky = !chunk.worldObj.provider.hasNoSky;
-        ExtendedBlockStorage[] deep = ((IDeepChunk) chunk).bellow$getDeepSections();
+        ExtendedBlockStorage[] deep = ((IDeepChunkInternal) chunk).bellow$getDeepSections();
         Block fill = DeepBlocks.fill;
         int fillMeta = DeepBlocks.fillMeta;
         int baseX = chunk.xPosition << 4;

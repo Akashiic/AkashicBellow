@@ -11,6 +11,8 @@ import com.akashiic.bellow.api.DeepConstants;
 import com.akashiic.bellow.api.IDeepChunk;
 import com.akashiic.bellow.storage.DeepDataManager;
 import com.akashiic.bellow.storage.DeepTiles;
+import com.akashiic.bellow.storage.GeneratorRecords;
+import com.akashiic.bellow.storage.IDeepChunkInternal;
 import com.akashiic.bellow.storage.IDormantData;
 
 /**
@@ -21,6 +23,8 @@ import com.akashiic.bellow.storage.IDormantData;
  * <li>tile entities and entities below the floor (a lost floor lock, a moved world) stay dormant and are written back
  * on save instead of crashing the chunk load or vanishing;</li>
  * <li>a deep section that cannot be read loads as empty and is written back unchanged, without failing the chunk;</li>
+ * <li>generator records and the light flag are saved, read and cloned as independent copies;</li>
+ * <li>a chunk of a newer deep format (read-only) never gets a deep section;</li>
  * <li>a world saved by a newer deep format asks for confirmation through ChunkAPI.</li>
  * </ul>
  */
@@ -121,6 +125,74 @@ public final class StorageProbe {
             "an unreadable deep section does not fail the chunk and is kept on disk",
             error == null && view.empty() && kept,
             "load error " + error + ", slot empty " + view.empty() + ", written back " + kept);
+
+        // --- generator records and the light flag: written, read back, cloned, never shared with the saved compound
+        Chunk gen = new Chunk(world, cx + 2, cz);
+        IDeepChunkInternal genState = (IDeepChunkInternal) gen;
+        genState.bellow$setGenState(DeepConstants.GEN_DECORATED);
+        genState.bellow$setLightPending(true);
+        GeneratorRecords.done(gen, "test:absent", GeneratorRecords.TERRAIN | GeneratorRecords.DECORATE);
+        GeneratorRecords.data(gen, "test:absent")
+            .setString("k", "v");
+        NBTTagCompound saved1 = new NBTTagCompound();
+        manager.writeChunkToNBT(gen, saved1);
+        GeneratorRecords.done(gen, "test:absent", GeneratorRecords.ON_DECORATED); // after the save was written
+        Chunk back = new Chunk(world, cx + 2, cz);
+        manager.readChunkFromNBT(back, saved1);
+        GeneratorRecords.done(back, "test:other", GeneratorRecords.TERRAIN); // must not reach saved1
+        Chunk clone = new Chunk(world, cx + 2, cz);
+        manager.cloneChunk(back, clone);
+        GeneratorRecords.done(back, "test:third", GeneratorRecords.TERRAIN); // must not reach the clone
+        boolean recWritten = saved1.getByte("L") == 1 && saved1.getCompoundTag("Gens")
+            .getCompoundTag("test:absent")
+            .getByte("S") == 3
+            && !saved1.getCompoundTag("Gens")
+                .hasKey("test:other");
+        boolean recRead = ((IDeepChunkInternal) back).bellow$isLightPending()
+            && GeneratorRecords.stages(back, "test:absent") == 3
+            && "v".equals(
+                GeneratorRecords.data(back, "test:absent")
+                    .getString("k"));
+        boolean recCloned = ((IDeepChunkInternal) clone).bellow$isLightPending()
+            && GeneratorRecords.stages(clone, "test:other") == 1
+            && GeneratorRecords.stages(clone, "test:third") == 0;
+        check.check(
+            "generator records and the light flag are saved, read and cloned as copies",
+            recWritten && recRead && recCloned,
+            "written " + recWritten + ", read " + recRead + ", cloned " + recCloned + " (" + saved1 + ")");
+
+        // --- a chunk of a newer format never gets a deep section, not even for light
+        // (and direct chunk writes there, or below the floor, are refused instead of indexing storageArrays[-n])
+        Chunk frozen = new Chunk(world, cx + 3, cz);
+        String thrown = null;
+        boolean placed = true;
+        DeepDataManager.markNewerForTests(frozen, true);
+        try {
+            frozen.setLightValue(net.minecraft.world.EnumSkyBlock.Block, 3, minY + 5, 3, 12);
+            placed = frozen.func_150807_a(4, minY + 5, 4, net.minecraft.init.Blocks.stone, 0);
+        } catch (RuntimeException e) {
+            thrown = e.toString();
+        } finally {
+            DeepDataManager.markNewerForTests(frozen, false);
+        }
+        Chunk floor = new Chunk(world, cx + 4, cz);
+        boolean placedBelow = true;
+        try {
+            floor.setLightValue(net.minecraft.world.EnumSkyBlock.Block, 3, minY - 3, 3, 12);
+            placedBelow = floor.func_150807_a(4, minY - 3, 4, net.minecraft.init.Blocks.stone, 0);
+        } catch (RuntimeException e) {
+            thrown = e.toString();
+        }
+        check.check(
+            "no deep section for a chunk of a newer format, no crash below the floor",
+            ((IDeepChunk) frozen).bellow$peekDeepSections() == null && !placed && !placedBelow && thrown == null,
+            "sections " + (((IDeepChunk) frozen).bellow$peekDeepSections() != null ? "created" : "none")
+                + ", write accepted "
+                + placed
+                + " / below the floor "
+                + placedBelow
+                + ", exception "
+                + thrown);
 
         // --- downgrade warning
         String newer = manager.versionChangeMessage("2");

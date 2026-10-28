@@ -2,6 +2,7 @@ package com.akashiic.bellow;
 
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.world.World;
+import net.minecraft.world.WorldServer;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -10,6 +11,7 @@ import com.akashiic.bellow.api.BellowAPI;
 import com.akashiic.bellow.gen.DeepBlocks;
 import com.akashiic.bellow.gen.DeepDecorator;
 import com.akashiic.bellow.gen.DeepGenerators;
+import com.akashiic.bellow.gen.DeepStages;
 import com.akashiic.bellow.net.DimensionInfoMessage;
 import com.akashiic.bellow.storage.DeepDataManager;
 import com.akashiic.bellow.world.DeepWorlds;
@@ -28,6 +30,7 @@ import cpw.mods.fml.common.event.FMLServerStartingEvent;
 import cpw.mods.fml.common.event.FMLServerStoppedEvent;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.gameevent.PlayerEvent;
+import cpw.mods.fml.common.gameevent.TickEvent;
 import cpw.mods.fml.common.network.NetworkRegistry;
 import cpw.mods.fml.common.network.simpleimpl.SimpleNetworkWrapper;
 import cpw.mods.fml.relauncher.Side;
@@ -80,9 +83,10 @@ public class AkashicBellow {
             && "chunkload".equals(System.getProperty("akashicbellow.selftest.phase"))) {
             com.akashiic.bellow.selftest.ChunkLoadProbe.registerCallback();
         }
-        if (Boolean.getBoolean("akashicbellow.selftest")
-            && "full".equals(System.getProperty("akashicbellow.selftest.phase", "full"))) {
-            com.akashiic.bellow.selftest.GeneratorProbe.register();
+        if (Boolean.getBoolean("akashicbellow.selftest")) {
+            String phase = System.getProperty("akashicbellow.selftest.phase", "full");
+            if ("full".equals(phase)) com.akashiic.bellow.selftest.GeneratorProbe.register();
+            if ("verify".equals(phase)) com.akashiic.bellow.selftest.GeneratorProbe.registerSecondOnly();
         }
         // Registered after EndlessIDs (dependency ordering), so the per-section packet budget already accounts for it.
         DataRegistry.registerDataManager(new DeepDataManager());
@@ -145,6 +149,15 @@ public class AkashicBellow {
     @Mod.EventHandler
     public void serverStopped(FMLServerStoppedEvent event) {
         DeepWorlds.clearCache();
+        DeepStages.clear();
+    }
+
+    /** After each world tick, outside any chunk load: the deep stages that write through the World. */
+    @SubscribeEvent
+    public void onWorldTick(TickEvent.WorldTickEvent event) {
+        if (event.phase == TickEvent.Phase.END && event.world instanceof WorldServer) {
+            DeepStages.tick((WorldServer) event.world);
+        }
     }
 
     @SubscribeEvent

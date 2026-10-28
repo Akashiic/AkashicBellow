@@ -9,9 +9,11 @@ import org.spongepowered.asm.mixin.injection.At;
 import com.akashiic.bellow.api.IDeepWorld;
 import com.akashiic.bellow.compat.archaic.DeepLightingInstaller;
 import com.akashiic.bellow.core.Compat;
+import com.akashiic.bellow.gen.StrictGuard;
 import com.akashiic.bellow.storage.DeepDataManager;
 import com.akashiic.bellow.world.ClientFloors;
 import com.akashiic.bellow.world.DeepWorlds;
+import com.akashiic.bellow.world.IDeepWorldInternal;
 import com.akashiic.bellow.world.LegacyGeneration;
 import com.llamalad7.mixinextras.expression.Definition;
 import com.llamalad7.mixinextras.expression.Expression;
@@ -27,7 +29,7 @@ import com.llamalad7.mixinextras.sugar.Local;
  * Every injector has an exact {@code require}/{@code allow}, so a changed target fails at startup.
  */
 @Mixin(value = World.class, priority = 1100)
-public abstract class MixinWorld_Deep implements IDeepWorld {
+public abstract class MixinWorld_Deep implements IDeepWorld, IDeepWorldInternal {
 
     @Unique
     private static final int bellow$UNRESOLVED = Integer.MIN_VALUE;
@@ -107,7 +109,7 @@ public abstract class MixinWorld_Deep implements IDeepWorld {
         return maxY >= this.bellow$getMinY();
     }
 
-    // -------------------------------------------------------------- y < 0
+    // -------------------------------------------------------------- y < 0 (and, in strict mode, generator contract)
 
     /** Deep data of a newer format is read-only in this session: a write there would be dropped on save. */
     @Unique
@@ -125,7 +127,8 @@ public abstract class MixinWorld_Deep implements IDeepWorld {
         allow = 1)
     private boolean bellow$belowFloor0(boolean original, @Local(argsOnly = true, ordinal = 0) int x,
         @Local(argsOnly = true, ordinal = 1) int y, @Local(argsOnly = true, ordinal = 2) int z) {
-        return y < this.bellow$getMinY() || y < 0 && (LegacyGeneration.active() || this.bellow$frozen(x, z));
+        return y < this.bellow$getMinY() || y < 0 && (LegacyGeneration.active() || this.bellow$frozen(x, z))
+            || StrictGuard.refuses((World) (Object) this, x, y, z);
     }
 
     @Definition(id = "y", local = @Local(type = int.class, argsOnly = true, ordinal = 1))
@@ -148,7 +151,8 @@ public abstract class MixinWorld_Deep implements IDeepWorld {
         allow = 1)
     private boolean bellow$belowFloor2(boolean original, @Local(argsOnly = true, ordinal = 0) int x,
         @Local(argsOnly = true, ordinal = 1) int y, @Local(argsOnly = true, ordinal = 2) int z) {
-        return y < this.bellow$getMinY() || y < 0 && (LegacyGeneration.active() || this.bellow$frozen(x, z));
+        return y < this.bellow$getMinY() || y < 0 && (LegacyGeneration.active() || this.bellow$frozen(x, z))
+            || StrictGuard.refuses((World) (Object) this, x, y, z);
     }
 
     @Definition(id = "y", local = @Local(type = int.class, argsOnly = true, ordinal = 1))

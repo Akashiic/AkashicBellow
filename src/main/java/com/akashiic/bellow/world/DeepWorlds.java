@@ -7,11 +7,15 @@ import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import net.minecraft.nbt.CompressedStreamTools;
 import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.nbt.NBTTagList;
+import net.minecraft.nbt.NBTTagString;
 import net.minecraft.world.World;
 import net.minecraft.world.WorldServer;
 import net.minecraft.world.storage.ISaveHandler;
@@ -21,7 +25,7 @@ import com.akashiic.bellow.BellowConfig;
 import com.akashiic.bellow.api.DeepConstants;
 
 /**
- * Resolves the floor of a world.
+ * Resolves the floor of a world, and records the deep generators each dimension was generated with.
  * <p>
  * Server worlds: the first time an enabled dimension of a save is opened, the configured floor is written to
  * {@code <save>/akashicbellow.dat}. From then on the stored value wins over the config, so a world can never end up
@@ -98,6 +102,63 @@ public final class DeepWorlds {
         LOCKS.put(dir.getAbsoluteFile(), updated);
         AkashicBellow.LOG.info("Dimension {} of '{}' locked to minY {}", dim, dir.getName(), configured);
         return configured;
+    }
+
+    /**
+     * Records the deep generators of a dimension ({@code id@version}, in order) next to its floor and warns when they
+     * changed since the last session: chunks generated from now on use the new list, so cave systems and borders may
+     * not match the chunks generated before (generators decide the shape of a chunk from the seed and the position).
+     */
+    public static synchronized void recordGenerators(WorldServer world, List<String> generators) {
+        ISaveHandler handler = world.getSaveHandler();
+        File dir = handler == null ? null : handler.getWorldDirectory();
+        if (dir == null) return;
+        int dim = world.provider.dimensionId;
+        NBTTagCompound lock = LOCKS.computeIfAbsent(dir.getAbsoluteFile(), DeepWorlds::readLock);
+        NBTTagCompound all = lock.getCompoundTag("Generators");
+        String key = Integer.toString(dim);
+        List<String> before = null;
+        if (all.hasKey(key, 9)) {
+            before = new ArrayList<>();
+            NBTTagList list = all.getTagList(key, 8);
+            for (int i = 0; i < list.tagCount(); i++) before.add(list.getStringTagAt(i));
+        }
+        if (generators.equals(before)) return;
+        if (before != null) {
+            AkashicBellow.LOG.warn(
+                "Deep generators of dimension {} of '{}' changed since the last session: {} -> {}. Chunks generated from"
+                    + " now on use the new list; caves may not continue across the border with chunks generated before.",
+                dim,
+                dir.getName(),
+                before,
+                generators);
+        } else if (!generators.isEmpty()) {
+            AkashicBellow.LOG.info("Deep generators of dimension {} of '{}': {}", dim, dir.getName(), generators);
+        }
+        NBTTagList list = new NBTTagList();
+        for (String g : generators) list.appendTag(new NBTTagString(g));
+        NBTTagCompound updated = (NBTTagCompound) lock.copy();
+        NBTTagCompound updatedAll = updated.getCompoundTag("Generators");
+        updatedAll.setTag(key, list);
+        updated.setTag("Generators", updatedAll);
+        writeLock(dir, updated);
+        LOCKS.put(dir.getAbsoluteFile(), updated);
+    }
+
+    /** The recorded generators of a dimension, or null (self test). */
+    public static synchronized List<String> recordedGenerators(WorldServer world) {
+        File dir = world.getSaveHandler() == null ? null
+            : world.getSaveHandler()
+                .getWorldDirectory();
+        if (dir == null) return null;
+        NBTTagCompound all = LOCKS.computeIfAbsent(dir.getAbsoluteFile(), DeepWorlds::readLock)
+            .getCompoundTag("Generators");
+        String key = Integer.toString(world.provider.dimensionId);
+        if (!all.hasKey(key, 9)) return null;
+        List<String> out = new ArrayList<>();
+        NBTTagList list = all.getTagList(key, 8);
+        for (int i = 0; i < list.tagCount(); i++) out.add(list.getStringTagAt(i));
+        return out;
     }
 
     /** Forget cached lock files, e.g. when the integrated server stops and another save is opened. */

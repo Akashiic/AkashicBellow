@@ -62,6 +62,7 @@ public final class SelfTest {
         try {
             if (phase.equals("verify")) {
                 this.verifyPersisted(minY);
+                com.akashiic.bellow.selftest.GeneratorProbe.verify((WorldServer) this.world, minY, this::check);
             } else {
                 this.retrogen(minY);
                 this.terrain(minY);

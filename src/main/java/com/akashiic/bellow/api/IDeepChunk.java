@@ -3,7 +3,8 @@ package com.akashiic.bellow.api;
 import net.minecraft.world.chunk.storage.ExtendedBlockStorage;
 
 /**
- * Implemented by {@link net.minecraft.world.chunk.Chunk} through a mixin.
+ * Implemented by {@link net.minecraft.world.chunk.Chunk} through a mixin. Read-only: the deep state of a chunk changes
+ * only through Bellow (generation stages, {@link IDeepRegion}, {@code World} writes).
  * <p>
  * Deep sections live outside the vanilla {@code storageArrays}: index
  * {@code (y >> 4) + DeepConstants.MAX_DEEP_SECTIONS}
@@ -13,23 +14,18 @@ import net.minecraft.world.chunk.storage.ExtendedBlockStorage;
  */
 public interface IDeepChunk {
 
-    /** Never null; allocates on first call. */
-    ExtendedBlockStorage[] bellow$getDeepSections();
-
-    /** May be null when the chunk never had deep data. */
+    /**
+     * The raw slot array, null when the chunk never had deep data. Includes the dormant slots below the floor: prefer
+     * {@link BellowAPI#getDeepSection}, which hides them.
+     */
     ExtendedBlockStorage[] bellow$peekDeepSections();
 
-    void bellow$setDeepSections(ExtendedBlockStorage[] sections);
-
     /**
-     * One of {@link DeepConstants#GEN_NONE}, {@link DeepConstants#GEN_TERRAIN}, {@link DeepConstants#GEN_DECORATED}.
+     * One of {@link DeepConstants#GEN_NONE}, {@link DeepConstants#GEN_TERRAIN}, {@link DeepConstants#GEN_DECORATED},
+     * or a later stage: compare with {@code >=} ({@link BellowAPI#isDecorated}).
      */
     byte bellow$getGenState();
 
-    void bellow$setGenState(byte state);
-
     /** True when the chunk was read from disk (as opposed to freshly generated) during this session. */
     boolean bellow$isFromDisk();
-
-    void bellow$setFromDisk(boolean fromDisk);
 }

@@ -42,8 +42,14 @@ teto vanilla (256) intocado, e **nenhuma mudança no caminho Y ≥ 0**.
 * **NBT por chunk** via `ChunkAPI ChunkDataManager` (`akashicbellow:deep`), nunca na lista vanilla `Sections`
   (o leitor do ChunkAPI/vanilla faria `array[Y]` com Y negativo → exceção → chunk regenerado).
   ```
-  akashicbellow: { deep: { V: 1, Gen: byte, Sections: [ {Y: byte(com sinal), <managers do ChunkAPI>} ] } }
+  akashicbellow: { deep: { V: 1, Gen: byte, L: byte (luz pendente, só quando 1),
+                            Gens: { "<id do gerador>": { S: etapas feitas, F: etapas que falharam,
+                                                         E: falhas de callback, V: versão, Data: {…} } },
+                            Sections: [ {Y: byte(com sinal), <managers do ChunkAPI>} ] } }
   ```
+  `L` e `Gens` (§5.1) entraram sem subir `V`: versões anteriores ignoram as duas chaves (e as descartam ao salvar de
+  novo). Registros de geradores ausentes nesta sessão são mantidos e regravados intactos. Na leitura e no save eles
+  são copiados: um chunk recarregado com o save ainda na fila é lido do mesmo compound que a thread de IO grava.
   Cada seção é serializada por `DataRegistryImpl.writeSubChunkToNBT`, ou seja, pelos mesmos managers que gravam as
   seções vanilla (inclusive os do EndlessIDs) — formato idêntico, IDs estendidos preservados.
 * **Tile entities profundas** ficam fora da lista vanilla `Level.TileEntities`: no `ChunkDataEvent.Save` elas vão para
@@ -54,7 +60,7 @@ teto vanilla (256) intocado, e **nenhuma mudança no caminho Y ≥ 0**.
 * **Versão do formato**: `V` é lido; dados profundos de um formato mais novo (downgrade do mod) não são carregados,
   ficam intactos e são regravados como estavam.
 * **Trava por mundo**: o `minY` efetivo de cada dimensão é gravado em `<mundo>/akashicbellow.dat` (mapa `Floors`,
-  escrita atômica) no primeiro uso. Mudar a config depois não altera mundos existentes, e uma dimensão travada que
+  escrita atômica) no primeiro uso; ao lado, `Generators` guarda os geradores profundos de cada dimensão (§5.1). Mudar a config depois não altera mundos existentes, e uma dimensão travada que
   sai da lista `dimensions` continua com o seu piso (com aviso no log): voltar ao piso 0 apagaria TEs e entidades
   profundas no próximo save. Arquivo corrompido → o servidor recusa subir (melhor que adivinhar um piso e perder
   dados).
@@ -116,77 +122,107 @@ Os avisos "cascading worldgen" do ArchaicFix vistos nos testes aparecem também 
 ### 5.1 Geradores profundos (API)
 
 Outros mods (por exemplo o VitaGenesis, cavernas da 1.18) entram na geração do subsolo por
-`BellowAPI.registerGenerator(id, IDeepGenerator)`. Ordem para um chunk, espelhando a 1.18 (carvers antes das
-features):
+`BellowAPI.registerGenerator(id, IDeepGenerator[, prioridade])`. Ordem para um chunk, espelhando a 1.18 (carvers,
+depois features, depois luz):
 
 1. Bellow preenche a camada profunda (bloco profundo, piso de bedrock) e troca a bedrock legada.
-2. `generateTerrain(chunk, minY, seed, retrogen)` de cada gerador, na ordem de registro, dentro do mesmo
-   `Chunk.onChunkLoad`, antes de o estado virar TERRAIN.
+2. `generateTerrain(chunk, minY, seed, retrogen)` de cada gerador, dentro do mesmo `Chunk.onChunkLoad`, antes de o
+   estado virar TERRAIN.
 3. Quando o chunk e os 8 vizinhos têm TERRAIN: minérios, tufo e cascalho do Bellow (os veios que descartam ao tocar ar
-   respeitam o que foi escavado no passo 2), depois `decorate(IDeepRegion)` de cada gerador.
-4. Estado DECORATED gravado, seções alteradas (minérios e geradores juntos) reenviadas aos jogadores que já tinham o
-   chunk, depois `onDecorated(world, chunk)`.
+   respeitam o que foi escavado no passo 2), depois `decorate(IDeepRegion)` de cada gerador. Estado DECORATED.
+4. **Depois do tick do mundo** (fora de qualquer carga de chunk): seções alteradas reenviadas (uma vez por chunk e
+   tick, máscaras somadas), depois `onDecorated(world, chunk)`.
+5. **Depois do tick do mundo, quando o 5×5 em volta está carregado e decorado**: a etapa de luz do Bellow acende as
+   fontes de luz do chunk (§7), depois `onLit(world, chunk)`.
+
+Os passos 4 e 5 vêm de uma fila por mundo (`DeepStages`), processada no `WorldTickEvent` END com orçamento de
+`stageBudgetMillis` (10 ms) por tick; o resto fica para o tick seguinte. Fora de uma carga de chunk, uma escrita pelo
+`World` não é capturada em `captureBlockSnapshots` (que pode reverter tudo daquele momento) nem roda dentro de
+`scheduledUpdatesAreImmediate` (fluido escorrendo recursivamente). Self-tests e ferramentas que carregam chunks fora
+do laço de ticks chamam `BellowAPI.runDeepStages(world)`.
 
 ```java
 // postInit (o mod declara required-after:akashicbellow)
 // apiVersion() lança NoSuchMethodError com a API 1: chame dentro de try/catch
-if (BellowAPI.apiVersion() >= 2) BellowAPI.registerGenerator("vitagenesis:caves", new IDeepGenerator() {
+if (BellowAPI.apiVersion() >= 3) BellowAPI.registerGenerator("vitagenesis:caves", new IDeepGenerator() {
+    @Override public String version() { return "1"; } // muda quando o formato das cavernas muda
     @Override public void generateTerrain(Chunk chunk, int minY, long seed, boolean retrogen) {
         for (int sy = minY >> 4; sy < 0; sy++) {
-            ExtendedBlockStorage ebs = BellowAPI.getDeepSection(chunk, sy); // escava: ebs.func_150818_a(x, y & 15, z, Blocks.air)
+            ExtendedBlockStorage ebs = BellowAPI.getDeepSection(chunk, sy);
+            // escava só o que ainda é o preenchimento: BellowAPI.isDeepFill / isBaseStone(bloco, meta)
         }
     }
     @Override public void decorate(IDeepRegion region) {
-        // origens no chunk (region.centerChunkX(), region.centerChunkZ()); region.setBlock(...) no 3×3, só minY..-1
+        // origens no chunk central; region.setBlock / placeOre / placeBlob no 3×3, só minY..-1
+        // lava, líquen, ametista: sem luz aqui, a etapa de luz do Bellow acende
     }
-    @Override public void onDecorated(WorldServer world, Chunk chunk) {
-        // luz de blocos luminosos colocados sem luz, ticks de fluido etc.
+    @Override public void onLit(WorldServer world, Chunk chunk) {
+        // 5×5 carregado e decorado, luz pronta: ativar fluidos pelo World, atualizações de vizinho
     }
-});
+}, 0);
 ```
 
 Garantias:
-* Cada passo roda **uma vez por chunk, para sempre** (o estado é salvo no NBT). Chunks cujo subsolo foi gerado antes de
-  o gerador existir nunca são entregues a ele: um gerador instalado depois não escava onde jogadores já construíram.
+* Cada passo roda **uma vez por chunk, para sempre**. O que cada gerador fez fica gravado no chunk
+  (`akashicbellow.deep.Gens`, §3; `BellowAPI.getGeneratorStages`): `onDecorated`/`onLit` que não puderam rodar
+  (chunk descarregado antes do fim do tick, servidor parado) rodam quando o chunk carrega de novo. Um callback que
+  lança exceção é tentado de novo nas cargas seguintes, no máximo 3 vezes.
+* Chunks cujo subsolo foi gerado antes de o gerador existir nunca são entregues a ele (`getGeneratorStages` = 0):
+  um gerador instalado depois não escava onde jogadores já construíram, nem acende ou ativa fluidos ali.
 * Gerador adicionado a um mundo que já tem subsolo: os chunks na fronteira do que já existia (TERRAIN sem
-  DECORATED) chegam ao `decorate` sem ter passado pelo `generateTerrain` dele; decore o que encontrar.
+  DECORATED) chegam ao `decorate` sem ter passado pelo `generateTerrain` dele (`getGeneratorStages` sem
+  `STAGE_TERRAIN`); decore o que encontrar. `IDeepRegion.genStateAt` diz quais vizinhos já estavam decorados antes
+  (possivelmente há muito tempo; `chunk.inhabitedTime` diz quanto tempo jogadores passaram ali).
 * `retrogen` = o chunk foi salvo antes de ter camada profunda (mundo antigo recebendo o subsolo agora); acima de 0 ele
   pode ter construções.
-* A lista é congelada no `FMLServerAboutToStartEvent` (ou na primeira geração) e registrada no log; registro tardio
-  ou id repetido lançam exceção.
-* Uma exceção de um gerador é registrada no log (pilha completa nas 3 primeiras, depois só contagem) e o chunk segue.
-* Com `ores = false`, a etapa 3 ainda roda se houver gerador registrado (antes, o chunk nunca chegava a DECORATED).
-* Um chunk pode carregar (e chegar às etapas 2–4) dentro da população de outro chunk, onde o `World` recusa escrita
-  abaixo de 0 aos geradores 1.7.10 (fase de população legada, acima). Os geradores registrados rodam fora dessa
-  fase: `World.setBlock` abaixo de 0 funciona para eles em qualquer etapa.
+* **Ordem**: prioridade crescente, depois id, qualquer que seja a ordem de carga dos mods (que muda quando se adiciona
+  um mod). A lista é congelada no `FMLServerAboutToStartEvent` (ou na primeira geração), registrada no log e gravada
+  por dimensão em `akashicbellow.dat` (`Generators`, com `id@version`); se mudar entre sessões, aviso no log (as
+  cavernas podem não continuar na fronteira com o que foi gerado antes). Registro tardio ou id repetido lançam
+  exceção. `appliesTo(WorldServer)` escolhe as dimensões de cada gerador (perguntado uma vez por mundo).
+* Uma exceção de um gerador é registrada no log (pilha completa nas 3 primeiras, depois só contagem) e o chunk segue;
+  os geradores seguintes rodam no mesmo chunk. Uma falha nos minérios do Bellow também não pula os geradores. O que
+  foi escrito antes da falha é marcado para salvar e reenviado (`finally`).
+* **`StackOverflowError` não é engolido** (nem outro `VirtualMachineError`): os frames desempilhados podem ser cargas
+  de chunk aninhadas, e o `originalLoadChunk` do Forge 1614 não tem `finally` (a chave fica em `loadingChunks`, o
+  gerador vanilla fica com buffers pela metade). Derrubar o servidor com relatório é o resultado seguro.
+* **Decorações nunca se aninham**: um chunk carregado de dentro de uma decoração (um gerador lendo o `World` fora da
+  região) só entra numa fila; os 3×3 que ele completa são decorados quando a decoração externa termina. Isso também
+  limita a profundidade de pilha que a decoração soma a uma carga de chunk.
+* Com `ores = false`, a etapa 3 ainda roda se houver gerador registrado.
+* Os callbacks rodam fora da fase de população legada (`World.setBlock` abaixo de 0 funciona para eles).
+* Chunks com dados profundos de formato mais novo (somente leitura nesta sessão) recusam escrita: `IDeepRegion`,
+  veios do Bellow, `World` e o próprio `Chunk` (que antes criava seção para luz ou bloco e perdia no save).
 
 Contrato:
-* Tudo na thread do servidor. `generateTerrain`: só o próprio chunk, só `minY..-1`, só blocos (sem TileEntity, sem
-  luz, sem vizinhos), função de seed e posição (as bordas dos chunks batem em qualquer ordem de geração).
-* `decorate`: origens no chunk central; escrita no 3×3 por `IDeepRegion.setBlock`, que só aceita `minY..-1`, remove a
-  TileEntity antiga e cria a nova na hora (baú, spawner), sem luz nem atualização de vizinhos.
+* Tudo na thread do servidor. `generateTerrain`: só o próprio chunk, só `minY..-1` por `BellowAPI.getDeepSection`
+  (toda seção da faixa existe neste ponto), só blocos (sem TileEntity, sem luz, sem vizinhos, sem `World`), função de
+  seed e posição (as bordas dos chunks batem em qualquer ordem de geração). Escave só o preenchimento
+  (`isDeepFill`/`isBaseStone`): num retrogen o subsolo pode ter blocos de jogadores ou de outro mod.
+* `decorate`: origens no chunk central; escrita no 3×3 por `IDeepRegion.setBlock` (remove a TileEntity antiga, cria a
+  nova na hora), `placeOre` (veio da 1.18 com a variante deepslate do registro do Et Futurum) e `placeBlob` (forma de
+  veio que substitui qualquer pedra-base, como `ore_clay`), só `minY..-1`, sem luz nem atualização de vizinhos, sem
+  escrita pelo `World`.
 * `decorate`: "depois dos minérios" vale para os veios deste chunk e dos vizinhos decorados antes; um vizinho decorado
   depois coloca os seus, que podem entrar neste chunk (como na 1.18). Veios nunca substituem ar.
-* `onDecorated`: só o 3×3 em volta tem garantia de estar carregado. Acesso ao `World` mais longe carrega ou gera chunks
-  (e pode decorar outros, chamando `onDecorated` de novo, em cascata). A luz pelo `World` (`func_147451_t`) é
-  ignorada em silêncio sem todos os chunks a 17 blocos carregados (perto da borda, chunks a dois de distância):
-  acenda blocos luminosos quando os chunks em volta estiverem garantidamente carregados (por exemplo quando o 5×5 em
-  volta estiver decorado).
+* `onDecorated`: o chunk está carregado; os vizinhos normalmente estão, mas confira (`chunkExists`) antes de depender
+  deles. `onLit`: o 5×5 está carregado e decorado, a luz já está pronta e nenhuma decoração vai escrever no 3×3 em
+  volta: escrita pelo `World` ali atualiza luz e vizinhos normalmente.
+* Dados por gerador e por chunk: `BellowAPI.getGeneratorData(chunk, id)` (NBT pequeno, salvo junto do subsolo e
+  mantido sem o addon; chame `setChunkModified` ao mudar).
 * A decoração roda no **fim** do `Chunk.onChunkLoad` do chunk que completa o 3×3, já com as TileEntities e entidades
-  dele registradas no mundo (no início, uma TileEntity criada ali entrava duas vezes na lista de ticks: um spawner
-  geraria em dobro). O terreno continua no início, antes do `ChunkEvent.Load`.
+  dele registradas no mundo. O terreno continua no início, antes do `ChunkEvent.Load`.
 * O reenvio após a decoração inclui os pacotes de descrição das TileEntities das seções alteradas (spawner, placa).
+* **Modo estrito** (`worldgen.strictGenerators`, para testar geradores): durante `generateTerrain` e `decorate`,
+  escrita pelo `World` que o contrato proíbe (qualquer uma no terreno; Y ≥ 0, abaixo do piso ou fora do 3×3 na
+  decoração) é registrada no log e recusada. Escritas de uma população legada aninhada (um chunk que o gerador fez
+  carregar) não são do gerador e passam.
+* Estados novos de geração, se vierem, serão numerados acima de DECORATED sem mudar `V`: compare com `>=`
+  (`BellowAPI.isDecorated`).
+* A API pública é somente leitura: os setters (`setGenState`, `setDeepSections`, `setFromDisk`, `setMinY`) e o
+  `getDeepSections` que aloca saíram de `IDeepChunk`/`IDeepWorld` para interfaces internas.
 
-Self-test (`GeneratorProbe`, fase `full`): um gerador de teste escava uma câmara 8×8×8 em 5×5 chunks novos e coloca
-marcadores pela região. Confere: terreno uma vez por chunk novo (49/49); decoração uma vez, depois do terreno dos 9
-chunks e depois dos minérios; câmara intacta após os minérios; 75/75 escritas aceitas (incluindo baú com TileEntity
-e escrita no vizinho) e 75/75 recusadas (Y 0, abaixo do piso, fora do 3×3); chunks fora da área sem alteração;
-`onDecorated` só com o estado gravado; `retrogen` igual a "chunk salvo antes do subsolo" (625 chamadas com retrogen
-nos chunks legados do teste, 0 divergências); com minérios desligados, o chunk ainda chega a DECORATED, sem minérios;
-um chunk carregado dentro de uma população legada (simulada) deixa o `onDecorated` escrever pelo `World` abaixo de 0.
-Controles negativos (cada defeito reintroduzido, o teste reprova): sem a chamada de `generateTerrain` (49/49 chunks
-sem terreno, câmaras cheias); com o bug antigo de `ores = false` (chunk parado em TERRAIN); gerador antes dos minérios
-(15 de 25 chunks decorados sem minério ainda); sem suspender a fase legada (escrita recusada).
+Self-test: ver §10.2.
 
 ## 6. Minérios — porte fiel da 1.18/1.20
 
@@ -237,6 +273,19 @@ crescendo para o fundo, ferro concentrado perto de 0, cobre só no topo da faixa
   ao `World` recebe um `DeepPhosphorEngine` (mesmo algoritmo do Phosphor, Y codificado como `y + 512` em 10 bits,
   bits 52..61). A troca é feita no `WorldEvent.Load` (todas as variantes de construtor de `World`, inclusive o
   servidor integrado), drenando antes as filas do motor antigo e limpando o cache de motor por chunk.
+* **Etapa de luz da geração** (`DeepLight`, §5.1): a decoração escreve direto nas seções, sem luz (com os vizinhos
+  só em parte carregados, `updateLightByType` seria ignorado). Um chunk decorado com geradores presentes fica com luz
+  pendente (`L`, salvo); quando o 5×5 em volta está carregado e decorado, um flood fill a partir das fontes de luz do
+  chunk (abaixo de 0) aplica a regra de `World.computeLightValue` (`max(emissão, vizinho − max(1, opacidade))`, emissor
+  opaco deixa a luz entrar) no 3×3, só aumentando valores. Como nenhuma decoração escreve mais no 3×3 depois disso e a
+  luz 15 anda no máximo 14 blocos, o resultado é final e independe da ordem; valores que o `World` já calculou (tochas
+  de jogadores) ficam. Acima de 0 nada é tocado. Seções alteradas são reenviadas no mesmo ciclo. Chunks decorados só
+  com os minérios do Bellow (sem gerador) não precisam de luz e não pagam a etapa.
+* **Bordas no cliente**: a hipótese de que a luz profunda cortada numa borda nunca é refeita porque as flags de borda
+  do ArchaicFix (`short`, 16 seções) não cobrem Y < 0 não procede como descrita: no ArchaicFix 0.8.0 essas flags só
+  são marcadas para a luz do céu (`relightSkylightColumn`), que é 0 abaixo de Y 0; a luz de bloco não usa flags em
+  nenhuma altura (o motor só ignora vizinhos descarregados). O caso real, luz gerada cortada na borda do que estava
+  carregado, é o que a etapa de luz resolve (5×5).
 * Detecção do Phosphor no coremod: classe do motor do ArchaicFix presente, Supernova ausente e
   `B:enablePhosphor` não desligado em `config/archaicfix.cfg`.
 
@@ -471,6 +520,77 @@ calculada só pelo cliente depois da troca de dimensão (luz 0) e a decoração 
 duplicada). A luz vinda pelo servidor passava mesmo sem a correção: por isso o teste também coloca um glowstone só
 no cliente.
 
+### 10.2 Terceira rodada: checklist do VitaGenesis (API 3)
+
+Origem: auditoria do VitaGenesis 0.1.0-beta.1 sobre o Below Core 0.1.0-beta.2 (`docs/AUDIT.md` §3 do VitaGenesis).
+Cada item foi conferido no código (e no fonte do Forge 1614 / ArchaicFix 0.8.0) antes de mexer.
+
+| item do checklist | veredito | o que mudou | evidência (self-test) |
+|---|---|---|---|
+| `DeepRegion.setBlock` aceita chunk NEWER (escrita perdida no save) | **defeito confirmado**; os veios do Bellow também entravam (`canWrite` olhava só a seção) | a região marca os chunks NEWER como somente leitura: `setBlock` e os veios recusam | vizinho NEWER: 0 blocos colocados nele, escrita do gerador recusada |
+| (achado ao testar) `Chunk.setLightValue`/`func_150807_a` criavam seção em chunk NEWER; abaixo do piso caíam no ramo vanilla `storageArrays[-n]` (`ArrayIndexOutOfBounds` para mods que escrevem direto no chunk) | **defeito** | criação recusada nos dois casos e a chamada cancelada (como o `World` faz) | chunk NEWER sem seção, escrita recusada, nenhuma exceção abaixo do piso |
+| `DeepDecorator` só pega `RuntimeException` e grava DECORATED antes; falha nos minérios não marca/reenvia os vizinhos e pula os geradores | **defeito confirmado** (o `catch` externo pulava o laço de reenvio e os geradores) | minérios e geradores isolados (`Throwable`, fatais relançados); marcação, reenvio e luz pendente num `finally` | minérios falhando de propósito + gerador falhando depois de escrever no vizinho: vidro salvo e na fila de reenvio, segundo gerador rodou |
+| `rethrowFatal` engole `StackOverflowError` | **confirmado** (`originalLoadChunk` sem `finally`: chave presa em `loadingChunks`) | todo `VirtualMachineError` é relançado | teste unitário (SOE atravessa, o gerador seguinte não roda) |
+| reentrância: decoração dentro de decoração/`onDecorated` | **confirmado** (um gerador lendo o `World` fora da região decorava outro chunk aninhado) | decorações nunca se aninham: carga durante decoração vai para fila, esvaziada no fim da externa; `onDecorated` saiu da carga de chunk | G carrega o último chunk do 3×3 de H: H decorado depois de G, 0 aninhadas |
+| `onDecorated` numa fila no fim do tick, fora de carga e de `captureBlockSnapshots` | feito | `DeepStages`: fila por mundo no `WorldTickEvent` END, orçamento de 10 ms/tick, pendências salvas no chunk | 902 chunks decorados, `onDecorated` 1× cada, nenhum antes do tick nem dentro de decoração |
+| etapa de luz no Below Core | feito, sem `markLight`: o Bellow varre as fontes de luz do chunk (pega também o que o `generateTerrain` escreveu) | `DeepLight` (5×5 decorado, flood fill pela regra do `World`, só aumenta), luz pendente salva (`L`), `onLit` depois | glowstone 15 / vizinho 14 só no chunk com 5×5 decorado; recalcular 512 posições pelo motor do `World` muda 0; luz e `onLit` pendentes retomados depois de reiniciar |
+| luz profunda nas bordas no cliente (flags do ArchaicFix) | **não procede como descrito** (§7: as flags só existem para luz do céu) | — (o caso real é coberto pela etapa de luz) | leitura do `LightingHooks`/`LightingEngine` do ArchaicFix 0.8.0 |
+| dados por chunk e por gerador | feito | `Gens` no NBT do subsolo: etapas, falhas, versão, `Data`; mantidos sem o addon, copiados no clone e na leitura | registros e dados lidos de volta numa JVM nova sem o gerador; escrita/leitura/clone como cópias independentes |
+| lista e ordem dos geradores no save | feito | `Generators` por dimensão em `akashicbellow.dat` (`id@version`), aviso no log quando muda | lista gravada na fase full, mudança gravada e registrada na fase verify |
+| `isDecorated` e estados ≥ 3 sem subir `V` | feito | `BellowAPI.isDecorated`; regra no javadoc de `DeepConstants`/`IDeepChunk` | — |
+| expor o preenchimento | feito | `getFillBlock`/`getFillMeta`/`isDeepFill`/`isBaseStone`/`isDeepHost` | — |
+| `placeOre`/`placeBlob` | feito | `IDeepRegion.placeOre` (variante deepslate do EFR) e `placeBlob` | (mesmo código dos veios do Bellow, `OreFeatureTest`) |
+| estado de cada vizinho | feito | `IDeepRegion.genStateAt`; `chunk.inhabitedTime` via `chunkAt` | — |
+| registro com metadados | feito em parte | prioridade (`registerGenerator(id, g, prioridade)`; ordem por prioridade e id, não pela ordem de carga), `appliesTo(WorldServer)`, `version()`; `contractVersion` não: um default no Bellow seria lido do jar do Bellow, não do gerador (sem valor); `apiVersion()` cobre a capacidade | segundo gerador (prioridade 10, registrado primeiro) roda depois |
+| tirar setters do contrato público | feito | `setGenState`, `setDeepSections`, `setFromDisk`, `getDeepSections` (aloca, expõe slots dormentes) e `setMinY` em interfaces internas; javadoc aponta `getDeepSection` | (compilação do VitaGenesis contra o `-api.jar`) |
+| modo estrito | feito | `worldgen.strictGenerators`: escrita proibida pelo `World` durante terreno/decoração registrada e recusada | 9 escritas no terreno e 2 na decoração recusadas, a de dentro da região aceita |
+| juntar reenvios por tick | feito | máscaras somadas por chunk e enviadas no fim do tick (decoração e luz) | seções do chunk 2002,2002 na fila uma vez, com a máscara somada |
+| gancho Y ≥ 0 (terragen 1.18) | fora do escopo | — | — |
+
+Controles negativos (cada correção desfeita, o self-test reprova; cada um rodado nas 3 fases):
+
+| controle (correção desfeita) | o que reprova |
+|---|---|
+| região sem a marca de somente leitura | vizinho NEWER: escrita do gerador aceita e 40 blocos de minério colocados nele |
+| decorador da beta.2 no caminho de falha (falha dos minérios encerra a decoração) | vidro do gerador ausente, nada na fila de reenvio, segundo gerador não rodou |
+| `StackOverflowError` engolido de novo | teste unitário: o SOE não atravessa e o gerador seguinte roda |
+| sem a fila de cargas durante a decoração | H decorado aninhado dentro de G (1 aninhada) |
+| `onDecorated` dentro da carga, como na beta.2 | 25 chunks da área com callback antes do tick; 902 chamadas dentro de decoração |
+| sem a etapa de luz | glowstone com luz 0; o motor do `World` corrige 1 das 512 posições; na fase verify a luz não volta |
+| `Gens` não gravado | registros não escritos; na fase verify etapas 0 e `onLit` nunca roda |
+| modo estrito sem efeito | 9/9 escritas do terreno aceitas, 10 vidros acima de 0, 0 recusadas |
+| `Chunk` sem a recusa de seção | seção criada no chunk NEWER e `ArrayIndexOutOfBoundsException: Index -5` abaixo do piso |
+| ordem de registro em vez de prioridade | lista e `akashicbellow.dat` na ordem errada, segundo gerador roda antes |
+
+Validação final desta rodada (mesmo código): unitários 27/27; Forge 3 fases (full 65 PASS, verify 13 PASS); Forge com
+o pack de compatibilidade (65 / 13); cliente vanilla (27), com o pack (28) e com Angelica (28), frames incluídos;
+Crucible de produção, fase full: 76 PASS (o pack gera 54 chunks a mais em cascata na área A; o modo estrito recusou
+exatamente as 11 escritas proibidas).
+
+Compatibilidade com o VitaGenesis 0.1.0-beta.1 (commit `98efcfd`, compilado contra o `-api.jar` desta versão,
+`tools/selftest.sh -64` dele, 3 fases):
+* sem alteração: compila e roda; reprovam só as verificações de luz do self-test dele (0/81 chunks iluminados pela
+  fila dele, checksum do reload diferente). O harness dele carrega chunks no `FMLServerStartedEvent`, sem ticks, e o
+  `onDecorated` (que alimenta a fila dele) agora roda depois do tick. Em jogo os ticks rodam, e o handler de tick do
+  Bellow (registrado no preInit) vem antes do dele (registrado no init) no mesmo tick.
+* com `BellowAPI.runDeepStages(world)` antes de cada `DeepLighting.processPending` do self-test (4 linhas): **PASS nas
+  3 fases**, incluindo "luz igual ao motor vanilla" (0 de 3672/7668/3942/9828 células mudam ao recalcular) com a etapa
+  de luz do Bellow e o flood dele rodando juntos (os dois só aumentam valores pela mesma regra), e nenhum erro do
+  Bellow no log.
+* O que o VitaGenesis pode remover quando adotar a API 3: a fila e o flood próprios (`DeepLighting`, trocar por
+  `onLit` para a ativação de fluidos), as marcas `Ours`/`Lit` em `Level.VitaGenesis` (trocar por
+  `getGeneratorStages`), parte do `vitagenesis.txt` (a lista de geradores já fica em `akashicbellow.dat`;
+  `version()` com as settings), a heurística "sólido sem TileEntity é pedra" (trocar por `isDeepFill`/`isBaseStone`).
+
+Rodadas anteriores do `GeneratorProbe` (API 2), ainda cobertas: terreno uma vez por chunk novo (49/49); decoração uma
+vez, depois do terreno dos 9 chunks e depois dos minérios; câmara intacta após os minérios; 75/75 escritas aceitas
+(incluindo baú com TileEntity e escrita no vizinho) e 75/75 recusadas (Y 0, abaixo do piso, fora do 3×3); chunks fora
+da área sem alteração; `retrogen` igual a "chunk salvo antes do subsolo"; com minérios desligados, o chunk ainda chega
+a DECORATED, sem minérios; um callback chamado depois de uma carga dentro de uma população legada (simulada) escreve
+pelo `World` abaixo de 0. Controles daquela rodada: sem a chamada de `generateTerrain` (49/49 chunks sem terreno,
+câmaras cheias); com o bug antigo de `ores = false` (chunk parado em TERRAIN); gerador antes dos minérios (15 de 25
+chunks decorados sem minério ainda); sem suspender a fase legada (escrita recusada).
+
 ## 11. Riscos abertos (beta)
 
 * Crucible: o servidor de produção foi testado (§10), sem jogadores reais conectados; os plugins foram exercitados
@@ -512,3 +632,13 @@ no cliente.
   conexões externas que expiram). `tools/crucibletest.sh` agora grava um dump das threads
   (`crucibletest-<fase>-stall.txt`) se o relatório não sair 10 min depois do "Done".
 * Cavernas profundas: fora deste mod, por geradores registrados na API (§5.1; o VitaGenesis é o primeiro).
+* API 3: `onDecorated` passou a rodar depois do tick do mundo. Um gerador que dependia de rodar dentro da carga do
+  chunk precisa se adaptar, e self-tests que carregam chunks fora do laço de ticks (no `FMLServerStartedEvent`)
+  precisam chamar `BellowAPI.runDeepStages(world)` antes de conferir callbacks ou luz.
+* Downgrade para a beta.2: `L` e `Gens` são ignorados e somem no próximo save do chunk (luz pendente e callbacks
+  pendentes daquele chunk não voltam; os blocos ficam).
+* Etapa de luz: só abaixo de 0 e só depois de o 5×5 estar decorado. Na borda do que já foi gerado as fontes de luz
+  ficam sem luz até os vizinhos serem gerados (o mesmo vale para `onLit`). Luz que deveria subir de Y −1 para Y ≥ 0
+  não sobe (o mundo acima de 0 não é tocado).
+* Modo estrito: escrita pelo `World` de um ouvinte de `ChunkEvent.Load` de outro mod, num chunk que o gerador fez
+  carregar, conta como violação do gerador (é só para teste).

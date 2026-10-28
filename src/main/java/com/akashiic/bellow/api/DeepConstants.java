@@ -8,9 +8,21 @@ public final class DeepConstants {
     /** Number of deep section slots per chunk ({@code -ABSOLUTE_MIN_Y / 16}). */
     public static final int MAX_DEEP_SECTIONS = 32;
 
+    // Generation states of a chunk (IDeepChunk.bellow$getGenState). A later version may add states after DECORATED,
+    // always numbered above it and without changing the saved format: compare with >=, never ==.
     public static final byte GEN_NONE = 0;
     public static final byte GEN_TERRAIN = 1;
     public static final byte GEN_DECORATED = 2;
+
+    // Stages a deep generator went through on a chunk (BellowAPI.getGeneratorStages), saved with the chunk.
+    /** {@link IDeepGenerator#generateTerrain} ran. */
+    public static final int STAGE_TERRAIN = 1;
+    /** {@link IDeepGenerator#decorate} ran with this chunk at the centre. */
+    public static final int STAGE_DECORATE = 2;
+    /** {@link IDeepGenerator#onDecorated} ran (or failed {@code 3} times). */
+    public static final int STAGE_ON_DECORATED = 4;
+    /** {@link IDeepGenerator#onLit} ran (or failed {@code 3} times). */
+    public static final int STAGE_ON_LIT = 8;
 
     private DeepConstants() {}
 

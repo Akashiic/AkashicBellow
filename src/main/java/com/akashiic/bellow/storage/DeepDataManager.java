@@ -122,6 +122,16 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
         return anyNewer && NEWER.containsKey(chunk);
     }
 
+    /** Self test only: treats a loaded chunk as one of a newer format (true), or not any more (false). */
+    public static void markNewerForTests(Chunk chunk, boolean newer) {
+        if (newer) {
+            NEWER.put(chunk, new NBTTagCompound());
+            anyNewer = true;
+        } else {
+            NEWER.remove(chunk);
+        }
+    }
+
     /** Whether any chunk of a newer format was read in this session (keeps the World write check free otherwise). */
     public static boolean anyNewer() {
         return anyNewer;
@@ -144,8 +154,14 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
             return;
         }
         IDeepChunk deep = (IDeepChunk) chunk;
+        IDeepChunkInternal state = (IDeepChunkInternal) chunk;
         nbt.setByte("V", NBT_VERSION);
         nbt.setByte("Gen", deep.bellow$getGenState());
+        // added in format 1 without raising it: older versions ignore both keys (and drop them on save)
+        if (state.bellow$isLightPending()) nbt.setByte("L", (byte) 1);
+        NBTTagCompound records = state.bellow$getGeneratorRecords();
+        // a copy: the compound is written later on the file IO thread, while the main thread keeps updating records
+        if (records != null && !records.hasNoTags()) nbt.setTag("Gens", records.copy());
         ExtendedBlockStorage[] sections = deep.bellow$peekDeepSections();
         NBTTagCompound[] unreadable = UNREADABLE.get(chunk);
         if (sections == null && unreadable == null) return;
@@ -167,7 +183,7 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
     @Override
     public void readChunkFromNBT(Chunk chunk, NBTTagCompound nbt) {
         // May run on the chunk IO thread: touch nothing but this chunk.
-        IDeepChunk deep = (IDeepChunk) chunk;
+        IDeepChunkInternal deep = (IDeepChunkInternal) chunk;
         deep.bellow$setFromDisk(true);
         if (nbt.hasKey("V") && nbt.getByte("V") > NBT_VERSION) {
             NEWER.put(chunk, (NBTTagCompound) nbt.copy());
@@ -186,6 +202,11 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
             return;
         }
         deep.bellow$setGenState(nbt.getByte("Gen"));
+        deep.bellow$setLightPending(nbt.getByte("L") != 0);
+        // copied: a chunk loaded again while its save is still queued is read from the very compound being written
+        deep.bellow$setGeneratorRecords(
+            nbt.hasKey("Gens", 10) ? (NBTTagCompound) nbt.getCompoundTag("Gens")
+                .copy() : null);
         if (!nbt.hasKey("Sections", 9)) return;
         NBTTagList list = nbt.getTagList("Sections", 10);
         if (list.tagCount() == 0) return;
@@ -234,9 +255,13 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
         NBTTagCompound[] unreadable = UNREADABLE.get(from);
         if (unreadable != null) UNREADABLE.put(to, unreadable.clone());
         IDeepChunk src = (IDeepChunk) from;
-        IDeepChunk dst = (IDeepChunk) to;
+        IDeepChunkInternal srcState = (IDeepChunkInternal) from;
+        IDeepChunkInternal dst = (IDeepChunkInternal) to;
         dst.bellow$setGenState(src.bellow$getGenState());
         dst.bellow$setFromDisk(src.bellow$isFromDisk());
+        dst.bellow$setLightPending(srcState.bellow$isLightPending());
+        NBTTagCompound records = srcState.bellow$getGeneratorRecords();
+        dst.bellow$setGeneratorRecords(records == null ? null : (NBTTagCompound) records.copy());
         ExtendedBlockStorage[] sections = src.bellow$peekDeepSections();
         if (sections == null) {
             dst.bellow$setDeepSections(null);
@@ -313,14 +338,15 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
 
     @Override
     public void readFromBuffer(Chunk chunk, int subChunkMask, boolean forceUpdate, ByteBuffer buffer) {
-        IDeepChunk deep = (IDeepChunk) chunk;
+        IDeepChunkInternal deep = (IDeepChunkInternal) chunk;
         if (!buffer.hasRemaining()) {
             if (forceUpdate) deep.bellow$setDeepSections(null);
             return;
         }
         int minY = buffer.getShort();
         World world = chunk.worldObj;
-        if (((IDeepWorld) world).bellow$getMinY() != minY) ((IDeepWorld) world).bellow$setMinY(minY);
+        if (((IDeepWorld) world).bellow$getMinY() != minY)
+            ((com.akashiic.bellow.world.IDeepWorldInternal) world).bellow$setMinY(minY);
 
         int mask = buffer.getInt();
         ExtendedBlockStorage[] sections = deep.bellow$getDeepSections();

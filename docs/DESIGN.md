@@ -255,10 +255,13 @@ inteira abaixo de 0. Não afeta a proteção dos claims.
 ## 10. Testes
 
 * **Unitários** (`./gradlew test`): alturas (qui-quadrado), forma dos veios, contagem esperada, empacotamento da luz,
-  constantes, gradiente da bedrock — 19 testes.
+  constantes, gradiente da bedrock, alcance vertical dos veios — 21 testes.
 * **Servidor, 3 fases em JVMs separadas** (`tools/selftest.sh [-Pbellow.compatRun=true]`): cria o mundo com a
-  geração desligada (chunks "legados"), religa e verifica retrogen, terreno, blocos/meta/TileEntity, luz, minérios;
-  depois uma JVM nova relê do disco. Roda sem mods e com EFR + EndlessIDs + ArchaicFix + Hodgepodge.
+  geração desligada (chunks "legados"), religa e verifica retrogen, terreno, blocos/meta/TileEntity, luz, minérios,
+  física no servidor (item pousa numa plataforma profunda, areia cai e vira bloco) e portal do Nether profundo (acende,
+  sobrevive a uma atualização, o `Teleporter` encontra); depois uma JVM nova relê do disco, inclusive o NBT cru do
+  chunk (TE profundo fora de `Level.TileEntities`). Roda sem mods e com EFR + EndlessIDs + ArchaicFix + Hodgepodge, e
+  no Crucible de produção.
 * **Sonda de compatibilidade com mods reais** (`-Dakashicbellow.selftest.phase=compat`, depois `compatverify` numa JVM
   nova; servidor de produção com o jar reobfuscado): coloca **todo bloco com TileEntity de todos os mods** (cada meta),
   toda entidade registrada e todo multibloco do Immersive Engineering na camada profunda e numa altura de controle com
@@ -312,7 +315,9 @@ inteira abaixo de 0. Não afeta a proteção dos claims.
   | disco por chunk | 6,8 KB | 7,7 KB | 11,7 KB |
 * **Cliente headless** (`tools/clienttest.sh [-Pbellow.compatRun=true -Pbellow.angelica=true]`, via `xvfb-run` e
   Mesa llvmpipe): mundo singleplayer, sala iluminada em `minY + 24`, tocha de parede colocada como jogador, baú;
-  compara cliente × servidor (blocos, meta, TE, luz) e tira screenshots em `run/client/screenshots/`.
+  compara cliente × servidor (blocos, meta, TE, luz) e tira screenshots em `run/client/screenshots/`. Uma placa
+  escrita abaixo de 0 num chunk que o cliente ainda não recebeu tem de chegar com o texto junto com o chunk (sem a
+  correção do pacote de descrição, chega vazia: verificado).
 
 ## 11. Riscos abertos (beta)
 

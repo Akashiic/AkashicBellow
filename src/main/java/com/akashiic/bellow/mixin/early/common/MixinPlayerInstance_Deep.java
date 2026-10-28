@@ -4,8 +4,10 @@ import java.util.List;
 
 import net.minecraft.network.Packet;
 import net.minecraft.server.management.PlayerManager;
+import net.minecraft.tileentity.TileEntity;
 import net.minecraft.world.ChunkCoordIntPair;
 import net.minecraft.world.WorldServer;
+import net.minecraft.world.chunk.Chunk;
 import net.minecraftforge.common.ForgeModContainer;
 
 import org.spongepowered.asm.mixin.Final;
@@ -17,6 +19,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import com.akashiic.bellow.api.BellowAPI;
+import com.akashiic.bellow.api.DeepConstants;
 import com.akashiic.bellow.net.DeepChanges;
 import com.akashiic.bellow.net.DeepNet;
 import com.akashiic.bellow.net.IDeepPlayerInstance;
@@ -99,10 +102,15 @@ public abstract class MixinPlayerInstance_Deep implements IDeepPlayerInstance, D
     @Override
     public void bellow$resendDeep(int slotMask) {
         WorldServer world = this.this$0.getWorldServer();
-        this.sendToAllPlayersWatchingChunk(
-            DeepNet.deepOnlyPacket(
-                world.getChunkFromChunkCoords(this.chunkLocation.chunkXPos, this.chunkLocation.chunkZPos),
-                slotMask));
+        Chunk chunk = world.getChunkFromChunkCoords(this.chunkLocation.chunkXPos, this.chunkLocation.chunkZPos);
+        this.sendToAllPlayersWatchingChunk(DeepNet.deepOnlyPacket(chunk, slotMask));
+        // the client recreates these tile entities from the blocks; their state (spawner mob, sign text) follows
+        for (Object o : chunk.chunkTileEntityMap.values()) {
+            TileEntity te = (TileEntity) o;
+            if (te.yCoord >= 0 || te.isInvalid() || (slotMask & DeepConstants.slotBit(te.yCoord >> 4)) == 0) continue;
+            Packet description = te.getDescriptionPacket();
+            if (description != null) this.sendToAllPlayersWatchingChunk(description);
+        }
     }
 
 }

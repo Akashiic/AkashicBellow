@@ -28,9 +28,19 @@ if [ ! -f .bellow-test-copy ]; then
   echo "refusing: $PWD has no .bellow-test-copy marker (this script deletes world/). Use a copy of the server." >&2
   exit 2
 fi
-rm -rf crash-reports akashicbellow-selftest.txt
+# the report this phase writes; only it decides the result (reports of other phases may still be in the directory)
+case "$phase" in
+  full) report=akashicbellow-selftest.txt ;;
+  *) report="akashicbellow-$phase.txt" ;;
+esac
+# every report goes: a stale one must never pass for this run (compat.dat and the recheck input stay for later phases)
+rm -rf crash-reports
+for f in akashicbellow-*.txt; do [ "$f" = akashicbellow-recheck-input.txt ] || rm -f -- "$f"; done
 # compatverify reads back the world written by compat; every other phase starts from a new world
-[ "$phase" = compatverify ] || rm -rf world
+level=$(sed -n 's/^level-name=//p' server.properties 2>/dev/null | tail -1)
+level=${level:-world}
+case "$level" in */*|.*|"") echo "refusing: unexpected level-name '$level'" >&2; exit 2 ;; esac
+[ "$phase" = compatverify ] || rm -rf -- "$level"
 agents=()
 for a in *-agent.jar; do [ -f "$a" ] && agents+=("-javaagent:$PWD/$a"); done
 JAVA=${JAVA:-java}
@@ -39,17 +49,21 @@ log="crucibletest-$phase.log"
 # crucibletest-<phase>-stall.txt (the report is written only when the whole test finished).
 rm -f "crucibletest-$phase-stall.txt"
 (
-  server() { pgrep -f "java .*-Dakashicbellow.selftest.phase=$phase -jar server.jar" | head -1; }
+  # the JVM itself, not the timeout wrapper whose command line holds the same arguments
+  server() { [ -s "crucibletest-$phase.pid" ] && pgrep -P "$(cat "crucibletest-$phase.pid")" | head -1; }
   sleep 30
   until grep -aq 'Done (' "$log" 2>/dev/null; do sleep 5; [ -n "$(server)" ] || exit 0; done
   for _ in $(seq 1 $(( ${STALL:-600} / 5 ))); do
-    ls akashicbellow-*.txt > /dev/null 2>&1 && exit 0
+    [ -f "$report" ] && exit 0
     [ -n "$(server)" ] || exit 0
     sleep 5
   done
   pid=$(server)
   [ -n "$pid" ] && jstack "$pid" > "crucibletest-$phase-stall.txt" 2>&1 && echo "stall: threads dumped to crucibletest-$phase-stall.txt"
 ) &
+# stdin: an open pipe that never sends anything, closed with the run (no sleep left behind)
+exec 3< <(exec sleep 86400)
+sleeper=$!
 timeout "${TIMEOUT:-3600}" "$JAVA" -Duser.timezone=America/Sao_Paulo -Dterminal.jline=false -Dterminal.ansi=true \
   -Dfile.encoding=UTF8 -Xms"${HEAP:-9216M}" -Xmx"${HEAP:-9216M}" -XX:+UseG1GC -XX:+ParallelRefProcEnabled \
   -XX:MaxGCPauseMillis=200 -XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC \
@@ -58,13 +72,19 @@ timeout "${TIMEOUT:-3600}" "$JAVA" -Duser.timezone=America/Sao_Paulo -Dterminal.
   -XX:InitiatingHeapOccupancyPercent=20 -XX:G1MixedGCLiveThresholdPercent=90 -XX:G1RSetUpdatingPauseTimePercent=5 \
   -XX:SurvivorRatio=32 -XX:+PerfDisableSharedMem -XX:MaxTenuringThreshold=1 "${agents[@]}" @java9args.txt \
   -Dfml.doNotBackup=true -Dfml.queryResult=confirm -Dakashicbellow.selftest=true -Dakashicbellow.selftest.exit=true \
-  -Dakashicbellow.selftest.phase="$phase" -jar server.jar nogui > "$log" 2>&1 < <(exec sleep 86400)
+  -Dakashicbellow.selftest.phase="$phase" -jar server.jar nogui > "$log" 2>&1 <&3 &
+echo $! > "crucibletest-$phase.pid"
+wait $!
 rc=$?
+kill "$sleeper" 2>/dev/null
+exec 3<&-
+rm -f "crucibletest-$phase.pid"
+
 echo "crucible $phase rc=$rc"
-grep -ahE "^(FAIL|FINDING|RESULT|SKIP)" akashicbellow-*.txt 2>/dev/null
+grep -ahE "^(FAIL|FINDING|RESULT|SKIP)" "$report" 2>/dev/null
 ls crash-reports 2>/dev/null
 [ "$rc" -ne 0 ] && exit "$rc"
 # a server that dies at boot (e.g. a mixin that found no target) writes no report
-ls akashicbellow-*.txt > /dev/null 2>&1 || { echo "no report (see crucibletest-$phase.log)"; exit 1; }
-grep -aq "^RESULT FAIL" akashicbellow-*.txt && exit 1
+[ -f "$report" ] || { echo "no report $report (see crucibletest-$phase.log)"; exit 1; }
+grep -aq "^RESULT FAIL" "$report" && exit 1
 exit 0

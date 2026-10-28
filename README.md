@@ -28,7 +28,10 @@ O desenho, as decisões e o motivo de não usar CubicChunks estão em [docs/DESI
 
 Servidores: Forge e **Crucible** (testado com o build de produção 1.7.10-staging-67b53034; o Bellow corrige o Y que o
 CraftBukkit entregava aos plugins). Para WorldEdit, WorldGuard e GriefPreventionPlus abaixo de 0, veja a seção
-"Plugins no Crucible" abaixo.
+"Plugins no Crucible" abaixo. Qualquer servidor com CraftBukkit (`v1_7_R4`) recebe as variantes do Crucible; outros
+forks (Thermos, Cauldron, KCauldron) não foram testados e, se o código deles diferir, o servidor recusa subir com
+um erro de mixin, sem tocar no mundo. Pelo mesmo motivo, as integrações com IC2 e Galacticraft exigem as versões do
+pack (IC2 2.2.828, Galacticraft 4.0): outra versão com o código mudado para o boot.
 
 Opcionais com integração: Et Futurum Requiem, EndlessIDs, ArchaicFix (Phosphor), Hodgepodge, Angelica,
 IndustrialCraft 2 (Minerador e Magnetizador alcançam a camada profunda) e Galacticraft (foguetes não são destruídos
@@ -108,7 +111,7 @@ os screenshots em `run/client/screenshots/`.
 
 ## API
 
-`com.akashiic.bellow.api.BellowAPI` (`API_VERSION = 2`):
+`com.akashiic.bellow.api.BellowAPI` (versão da API 2, em `BellowAPI.apiVersion()`):
 
 * Leitura: `getMinY(world)`, `hasDeepLayers(world)`, `getDeepSection(chunk, sectionY)`, para mods que iteram seções
   diretamente e querem enxergar o subsolo.
@@ -120,5 +123,6 @@ os screenshots em `run/client/screenshots/`.
 * `resendDeepSections(world, chunk, slotMask)`: reenvia seções escritas diretamente aos jogadores que já receberam o
   chunk.
 
-Para depender da API, declare `required-after:akashicbellow` e confira `BellowAPI.API_VERSION >= 2` em tempo de
-execução (a versão do mod carrega o sufixo do commit nos builds de CI).
+Para depender da API, declare `required-after:akashicbellow` e confira `BellowAPI.apiVersion() >= 2` em tempo de
+execução, dentro de um `try`/`catch (NoSuchMethodError e)` (a API 1 não tem o método). Não compare a versão do mod:
+os builds de CI levam o sufixo do commit.

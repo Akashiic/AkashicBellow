@@ -89,7 +89,8 @@ public final class DeepGenerators {
             for (Entry e : entries) {
                 try {
                     e.generator.generateTerrain(chunk, minY, seed, retrogen);
-                } catch (RuntimeException | LinkageError ex) {
+                } catch (Throwable ex) {
+                    rethrowFatal(ex);
                     failed(e, "generateTerrain", chunk, ex);
                 }
             }
@@ -105,7 +106,8 @@ public final class DeepGenerators {
             for (Entry e : entries) {
                 try {
                     e.generator.decorate(region);
-                } catch (RuntimeException | LinkageError ex) {
+                } catch (Throwable ex) {
+                    rethrowFatal(ex);
                     failed(e, "decorate", centre, ex);
                 }
             }
@@ -121,13 +123,20 @@ public final class DeepGenerators {
             for (Entry e : entries) {
                 try {
                     e.generator.onDecorated(world, chunk);
-                } catch (RuntimeException | LinkageError ex) {
+                } catch (Throwable ex) {
+                    rethrowFatal(ex);
                     failed(e, "onDecorated", chunk, ex);
                 }
             }
         } finally {
             LegacyGeneration.resume(legacy);
         }
+    }
+
+    /** The JVM itself is in trouble: let it through. Everything else (a stack overflow included) is the generator's. */
+    private static void rethrowFatal(Throwable ex) {
+        if (ex instanceof ThreadDeath) throw (ThreadDeath) ex;
+        if (ex instanceof VirtualMachineError && !(ex instanceof StackOverflowError)) throw (VirtualMachineError) ex;
     }
 
     private static void failed(Entry e, String step, Chunk chunk, Throwable ex) {

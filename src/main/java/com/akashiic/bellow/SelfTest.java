@@ -72,6 +72,7 @@ public final class SelfTest {
                 this.physics(minY);
                 this.portal(minY);
                 com.akashiic.bellow.selftest.GeneratorProbe.run((WorldServer) this.world, minY, this::check);
+                com.akashiic.bellow.selftest.StorageProbe.run((WorldServer) this.world, this::check);
                 if (com.akashiic.bellow.core.Compat.crucible) {
                     com.akashiic.bellow.selftest.BukkitProbe.run((WorldServer) this.world, this::check);
                     com.akashiic.bellow.selftest.PluginProbe.run((WorldServer) this.world, this::check);
@@ -334,6 +335,46 @@ public final class SelfTest {
             "teleporter finds a portal below 0",
             found && traveller.posY < 0,
             String.format("found=%s posY=%.1f", found, traveller.posY));
+
+        // zombie pigmen spawn from a portal below 0 (on the obsidian under it); a random that always says "spawn"
+        java.util.Random always = new java.util.Random() {
+
+            @Override
+            public int nextInt(int bound) {
+                return 0;
+            }
+        };
+        net.minecraft.util.AxisAlignedBB around = net.minecraft.util.AxisAlignedBB
+            .getBoundingBox(x - 2, y - 2, z - 2, x + 5, y + 6, z + 3);
+        int before = this.world.getEntitiesWithinAABB(net.minecraft.entity.monster.EntityPigZombie.class, around)
+            .size();
+        boolean spawning = this.world.getGameRules()
+            .getGameRuleBooleanValue("doMobSpawning") && this.world.difficultySetting.getDifficultyId() > 0;
+        Blocks.portal.updateTick(this.world, x + 1, y + 2, z, always);
+        java.util.List<?> pigmen = this.world
+            .getEntitiesWithinAABB(net.minecraft.entity.monster.EntityPigZombie.class, around);
+        this.check(
+            "portal below 0 spawns zombie pigmen",
+            !spawning || pigmen.size() > before,
+            spawning ? pigmen.size() - before + " spawned" : "mob spawning off or peaceful: not checked");
+        for (Object e : pigmen) ((net.minecraft.entity.Entity) e).setDead();
+
+        // the dragon egg falls below 0 (instant fall: straight to the ground)
+        int ex = x + 1, ez = z + 3;
+        for (int dy = 0; dy <= 8; dy++) this.world.setBlock(ex, y + dy, ez, dy == 0 ? Blocks.stone : Blocks.air, 0, 2);
+        this.world.setBlock(ex, y + 8, ez, Blocks.dragon_egg, 0, 2);
+        boolean instant = net.minecraft.block.BlockFalling.fallInstantly;
+        net.minecraft.block.BlockFalling.fallInstantly = true;
+        try {
+            Blocks.dragon_egg.updateTick(this.world, ex, y + 8, ez, this.world.rand);
+        } finally {
+            net.minecraft.block.BlockFalling.fallInstantly = instant;
+        }
+        this.check(
+            "dragon egg falls below 0",
+            this.world.getBlock(ex, y + 1, ez) == Blocks.dragon_egg && this.world.isAirBlock(ex, y + 8, ez),
+            "at the ground: " + CommandNames.name(this.world.getBlock(ex, y + 1, ez)));
+        this.world.setBlockToAir(ex, y + 1, ez);
     }
 
     /** Spawn chunks of a world first generated with worldgen.enabled=false must have been filled on load. */

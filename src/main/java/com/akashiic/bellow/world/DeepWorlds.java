@@ -61,6 +61,13 @@ public final class DeepWorlds {
         NBTTagCompound floors = lock.getCompoundTag("Floors");
         String key = Integer.toString(dim);
         if (floors.hasKey(key)) {
+            if (floors.func_150299_b(key) != 3) { // TAG_Int; any other type would read as a floor of 0
+                throw new IllegalStateException(
+                    "The deep floor lock of dimension " + dim
+                        + " in "
+                        + new File(dir, FILE_NAME)
+                        + " is not an integer; refusing to guess the deep floor of this world");
+            }
             int locked = DeepConstants.sanitizeMinY(floors.getInteger(key));
             if (!enabled) {
                 AkashicBellow.LOG.warn(
@@ -82,9 +89,13 @@ public final class DeepWorlds {
         }
         if (!enabled || configured >= 0) return 0;
 
-        floors.setInteger(key, configured);
-        lock.setTag("Floors", floors);
-        writeLock(dir, lock);
+        // written first, cached after: a failed write must not leave a lock that exists only in memory
+        NBTTagCompound updated = (NBTTagCompound) lock.copy();
+        NBTTagCompound updatedFloors = updated.getCompoundTag("Floors");
+        updatedFloors.setInteger(key, configured);
+        updated.setTag("Floors", updatedFloors);
+        writeLock(dir, updated);
+        LOCKS.put(dir.getAbsoluteFile(), updated);
         AkashicBellow.LOG.info("Dimension {} of '{}' locked to minY {}", dim, dir.getName(), configured);
         return configured;
     }
@@ -111,8 +122,13 @@ public final class DeepWorlds {
         File file = new File(dir, FILE_NAME);
         File tmp = new File(dir, FILE_NAME + ".tmp");
         try {
+            // compressed in memory: writeCompressed closes its stream, and the file must be synced before it closes
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            CompressedStreamTools.writeCompressed(lock, bytes);
             try (FileOutputStream out = new FileOutputStream(tmp)) {
-                CompressedStreamTools.writeCompressed(lock, out);
+                bytes.writeTo(out);
+                out.getFD()
+                    .sync(); // on disk before the rename: a power loss must not leave an empty lock behind
             }
             // atomic where the file system allows it: a crash must never leave the save without its locks
             try {

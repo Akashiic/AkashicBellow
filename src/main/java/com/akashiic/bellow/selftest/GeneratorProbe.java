@@ -47,6 +47,7 @@ public final class GeneratorProbe implements IDeepGenerator {
     private int decoratedBeforeNeighbourTerrain;
     private int chamberFilledBeforeDecorate;
     private int decoratedBeforeOres;
+    private final java.util.List<int[]> regionChests = new java.util.ArrayList<>();
     private int writeOk, writeRefused, writeWrong;
     private int chestsMissing;
     private int onDecoratedTooEarly;
@@ -91,6 +92,14 @@ public final class GeneratorProbe implements IDeepGenerator {
         // Bellow's ores already ran (1.18 order) and left the chamber alone (veins never replace air)
         if (countSolid(region, bx, bz, minY) != 0) this.chamberFilledBeforeDecorate++;
         if (GenConfig.ores && countPlaced(region.world(), cx, cz, minY) == 0) this.decoratedBeforeOres++;
+
+        // a chest in each of the 9 chunks, so also in the one whose load completed this region (its tile entities are
+        // registered by the end of its onChunkLoad): one position per (chunk, centre) pair, away from the chambers
+        for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) {
+            int tx = ((cx + dx) << 4) + 2 + 2 * (1 - dx), tz = ((cz + dz) << 4) + 2 + 2 * (1 - dz);
+            if (region.setBlock(tx, minY + 50, tz, Blocks.chest, 0))
+                this.regionChests.add(new int[] { tx, minY + 50, tz });
+        }
 
         int y = minY + CHAMBER;
         this.expectWrite(
@@ -222,6 +231,22 @@ public final class GeneratorProbe implements IDeepGenerator {
                 + p.writeWrong
                 + ", chests without tile entity "
                 + p.chestsMissing);
+        // the chests placed during decoration tick once: registered with the world once, not again by onChunkLoad
+        java.util.Map<Object, Integer> ticking = new java.util.IdentityHashMap<>();
+        for (Object te : world.loadedTileEntityList) ticking.merge(te, 1, Integer::sum);
+        int chestsChecked = 0, notOnce = 0;
+        for (int[] pos : p.regionChests) {
+            Object chest = world.getTileEntity(pos[0], pos[1], pos[2]);
+            chestsChecked++;
+            if (!(chest instanceof TileEntityChest) || ticking.getOrDefault(chest, 0) != 1) notOnce++;
+        }
+        check.check(
+            "tile entities placed during decoration tick once",
+            chestsChecked == 25 * 9 && notOnce == 0,
+            chestsChecked + " chests in the 9 chunks of each region, "
+                + notOnce
+                + " not in the ticking list exactly once");
+
         Block glass = world.getBlock((A0 << 4) + 17, minY + 40, (A0 << 4) + 1);
         check.check("IDeepRegion writes into a neighbour", glass == Blocks.glass, "" + glass);
         int open = countAir(world, A0 - 1, A0 + 2, minY);

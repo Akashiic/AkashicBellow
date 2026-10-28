@@ -2,6 +2,7 @@ package com.akashiic.bellow.mixin.early.common;
 
 import net.minecraft.block.Block;
 import net.minecraft.init.Blocks;
+import net.minecraft.nbt.NBTTagList;
 import net.minecraft.world.EnumSkyBlock;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.Chunk;
@@ -19,6 +20,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import com.akashiic.bellow.api.DeepConstants;
 import com.akashiic.bellow.api.IDeepChunk;
 import com.akashiic.bellow.api.IDeepWorld;
+import com.akashiic.bellow.storage.IDormantData;
 
 /**
  * Routes {@code storageArrays[y >> 4]} to the deep sections when the index is negative.
@@ -29,7 +31,7 @@ import com.akashiic.bellow.api.IDeepWorld;
  * the heightmap of a column is never below 0, so deep writes never touch skylight bookkeeping.
  */
 @Mixin(value = Chunk.class, priority = 1100)
-public abstract class MixinChunk_Deep implements IDeepChunk {
+public abstract class MixinChunk_Deep implements IDeepChunk, IDormantData {
 
     @Shadow
     public World worldObj;
@@ -42,6 +44,30 @@ public abstract class MixinChunk_Deep implements IDeepChunk {
 
     @Unique
     private boolean bellow$fromDisk;
+
+    @Unique
+    private NBTTagList bellow$dormantTiles;
+
+    @Unique
+    private NBTTagList bellow$dormantEntities;
+
+    // ---------------------------------------------------------------- IDormantData
+
+    @Override
+    public NBTTagList bellow$getDormantTiles() {
+        return this.bellow$dormantTiles;
+    }
+
+    @Override
+    public NBTTagList bellow$getDormantEntities() {
+        return this.bellow$dormantEntities;
+    }
+
+    @Override
+    public void bellow$setDormant(NBTTagList tiles, NBTTagList entities) {
+        this.bellow$dormantTiles = tiles;
+        this.bellow$dormantEntities = entities;
+    }
 
     // ---------------------------------------------------------------- IDeepChunk
 
@@ -150,6 +176,17 @@ public abstract class MixinChunk_Deep implements IDeepChunk {
     @Inject(method = "setLightValue(Lnet/minecraft/world/EnumSkyBlock;IIII)V", at = @At("HEAD"), require = 1)
     private void bellow$prepareForLight(EnumSkyBlock type, int x, int y, int z, int value, CallbackInfo ci) {
         if (y < 0) this.bellow$ensureDeepSection(y);
+    }
+
+    /**
+     * Vanilla answers a missing section with full sky light, right for the empty air above the terrain. A missing deep
+     * section (a void deep layer: generation off, or nothing placed yet) is dark, as every other light path below Y 0
+     * already answers.
+     */
+    @Inject(method = "getBlockLightValue(IIII)I", at = @At("HEAD"), cancellable = true, require = 1)
+    private void bellow$darkWithoutSection(int x, int y, int z, int skylightSubtracted,
+        CallbackInfoReturnable<Integer> cir) {
+        if (y < 0 && this.bellow$deepGet(y >> 4) == null) cir.setReturnValue(0);
     }
 
     @Unique

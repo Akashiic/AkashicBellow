@@ -54,8 +54,19 @@ public final class DeepBlocks {
                     AkashicBellow.LOG.error("worldgen.deepBlock '{}': metadata is not a number; using 0", spec);
                 }
             }
-            if (fillMeta < 0) { // EndlessIDs allows metadata above 15, so only negative values are rejected
-                AkashicBellow.LOG.error("worldgen.deepBlock '{}': negative metadata; using 0", spec);
+            if (fillMeta < 0 || fillMeta > 15 && !cpw.mods.fml.common.Loader.isModLoaded("endlessids")) {
+                // vanilla stores 4 bits: meta 20 would be saved as 4, the fill would never match itself as a host
+                AkashicBellow.LOG.error("worldgen.deepBlock '{}': metadata out of range; using 0", spec);
+                fillMeta = 0;
+            }
+            // the whole layer is made of it: no air (ores would float in the void), no tile entity, nothing that falls
+            if (fill.getMaterial() == net.minecraft.block.material.Material.air || fill.hasTileEntity(fillMeta)
+                || fill instanceof net.minecraft.block.BlockFalling) {
+                AkashicBellow.LOG.error(
+                    "worldgen.deepBlock '{}' cannot fill the deep layer (air, tile entity or falling block); using {}",
+                    spec,
+                    efrDeepslate != null ? "etfuturum:deepslate" : "minecraft:stone");
+                fill = efrDeepslate != null ? efrDeepslate : Blocks.stone;
                 fillMeta = 0;
             }
         }

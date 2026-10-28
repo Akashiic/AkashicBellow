@@ -164,6 +164,11 @@ public class AkashicBellow {
 
     private static void announce(World world, net.minecraft.entity.player.EntityPlayer player) {
         if (world == null || !(player instanceof EntityPlayerMP)) return;
+        EntityPlayerMP mp = (EntityPlayerMP) player;
+        // fake players (machines, other mods) have no client and often no network handler or channel
+        if (player instanceof net.minecraftforge.common.util.FakePlayer || mp.playerNetServerHandler == null
+            || mp.playerNetServerHandler.netManager == null
+            || mp.playerNetServerHandler.netManager.channel() == null) return;
         network.sendTo(
             new DimensionInfoMessage(world.provider.dimensionId, BellowAPI.getMinY(world)),
             (EntityPlayerMP) player);

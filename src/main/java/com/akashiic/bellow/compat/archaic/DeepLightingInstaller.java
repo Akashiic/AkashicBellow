@@ -52,6 +52,19 @@ public final class DeepLightingInstaller {
         }
     }
 
+    /** Class name of the lighting engine a world uses (diagnostics and tests). */
+    public static synchronized String engineOf(World world) {
+        try {
+            if (worldEngine == null) worldEngine = fieldOfType(World.class, LightingEngine.class);
+            Object engine = worldEngine.get(world);
+            return engine == null ? "none"
+                : engine.getClass()
+                    .getSimpleName();
+        } catch (ReflectiveOperationException e) {
+            return "unknown (" + e + ")";
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static List<Chunk> loadedChunks(IChunkProvider provider) throws ReflectiveOperationException {
         if (provider instanceof ChunkProviderServer) return ((ChunkProviderServer) provider).loadedChunks;

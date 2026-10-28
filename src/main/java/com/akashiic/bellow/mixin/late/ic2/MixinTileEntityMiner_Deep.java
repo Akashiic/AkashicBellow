@@ -50,6 +50,15 @@ public abstract class MixinTileEntityMiner_Deep {
         return this.bellow$floor();
     }
 
+    /**
+     * {@code return -1} when the pipe reaches the bottom: -1 is a real Y below 0, so "not found" becomes one below the
+     * floor (withdrawing then starts at the floor, as vanilla starts at 0).
+     */
+    @ModifyConstant(method = "getOperationHeight", constant = @Constant(intValue = -1), require = 1, allow = 1)
+    private int bellow$notFound(int minusOne) {
+        return this.bellow$floor() - 1;
+    }
+
     /** {@code y < 0 || ...} (the second zero jump is {@code energy >= 3.0}) */
     @ModifyConstant(
         method = "withDrawPipe",

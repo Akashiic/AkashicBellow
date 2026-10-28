@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 RUN=run/server
 CFG=$RUN/config/akashicbellow.cfg
-mkdir -p "$RUN"
+mkdir -p "$RUN" build
 echo "eula=true" > "$RUN/eula.txt"
 printf "online-mode=false\nspawn-protection=0\nlevel-seed=akashic\nmax-tick-time=-1\n" > "$RUN/server.properties"
 rm -rf "$RUN/world" "$RUN/crash-reports" "$RUN"/akashicbellow-selftest*.txt

@@ -17,10 +17,20 @@ import os
 import re
 import sys
 
+NUM = r"(-?[\d.]+(?:[eE][-+]?\d+)?)"  # SnakeYAML writes large doubles as 3.0E7
 REGION = re.compile(r"^    (\S.*):\s*$")
-CORNER = re.compile(r"^        (min|max): \{x: (-?[\d.]+), y: (-?[\d.]+), z: (-?[\d.]+)\}")
+CORNER = re.compile(r"^        (min|max): \{x: " + NUM + r", y: " + NUM + r", z: " + NUM + r"\}")
 POLY_Y = re.compile(r"^        (min-y|max-y): (-?\d+)")
 TYPE = re.compile(r"^        type: (\S+)")
+
+
+def unquote(key):
+    """A YAML mapping key as written by SnakeYAML: plain, 'single' ('' is a quote) or "double" quoted."""
+    if len(key) >= 2 and key[0] == key[-1] == "'":
+        return key[1:-1].replace("''", "'")
+    if len(key) >= 2 and key[0] == key[-1] == '"':
+        return key[1:-1].encode().decode("unicode_escape")
+    return key
 
 
 def regions(path):
@@ -29,7 +39,7 @@ def regions(path):
         for line in f:
             m = REGION.match(line)
             if m:
-                cur = {"id": m.group(1).strip("'\""), "type": None}
+                cur = {"id": unquote(m.group(1)), "type": None}
                 out.append(cur)
                 continue
             if cur is None:
@@ -70,7 +80,9 @@ def main():
                 (r, "poly2d y %d..%d" % (r["min-y"], r["max-y"]),
                  "/rg select %s  //expand vert  /rg redefine %s" % (r["id"], r["id"])))
         else:
-            other.append((r, r["type"] or "?", ""))
+            # a cuboid or polygon whose heights were not understood must not pass for "not at Y 0"
+            unknown = r["type"] in ("cuboid", "poly2d")
+            other.append((r, (r["type"] or "?") + (" (heights not parsed: check by hand)" if unknown else ""), ""))
     print("%s (floor %d)" % (path, a.floor))
     print("\nStop at Y 0 (do not protect below it): %d" % len(stop_at_zero))
     for r, shape, fix in stop_at_zero:

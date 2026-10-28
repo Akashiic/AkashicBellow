@@ -195,7 +195,7 @@ final class WorldEditPatches implements Opcodes {
     }
 
     /**
-     * {@code //chunk} starts the selection at Y 0, and {@code //expand vert} grows it by {@code maxY + 1} each way,
+     * {@code //chunk} starts the selection at Y 0 (and, without {@code -s}, ends it {@code maxY} above its start), and {@code //expand vert} grows it by {@code maxY + 1} each way,
      * which falls short of the floor from high up; it grows by {@code maxY - floor + 1} instead.
      */
     static void selectionCommands(Patcher p) {
@@ -214,6 +214,15 @@ final class WorldEditPatches implements Opcodes {
             push(16),
             op(IMUL),
             call(INVOKESPECIAL, VECTOR, "<init>", "(III)V"))) p.replace(chunk, s[0], p.floor(new VarInsnNode(ALOAD, 5)));
+        // without -s the top corner is min.add(15, maxY, 15): from the floor that ends maxY above it, not at maxY
+        AbstractInsnNode[] top = p.single(
+            chunk,
+            push(15),
+            var(ALOAD, 5),
+            call(INVOKEINTERFACE, WORLD, "getMaxY", "()I"),
+            push(15),
+            call(INVOKEVIRTUAL, VECTOR, "add", "(III)L" + VECTOR + ";"));
+        p.insertAfter(chunk, top[2], concat(p.floor(new VarInsnNode(ALOAD, 5)), new InsnNode(ISUB)));
 
         MethodNode expand = p.method("expand", COMMAND_DESC);
         for (AbstractInsnNode[] s : p.find(

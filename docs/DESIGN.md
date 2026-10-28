@@ -129,7 +129,8 @@ features):
 
 ```java
 // postInit (o mod declara required-after:akashicbellow)
-if (BellowAPI.API_VERSION >= 2) BellowAPI.registerGenerator("vitagenesis:caves", new IDeepGenerator() {
+// apiVersion() lança NoSuchMethodError com a API 1: chame dentro de try/catch
+if (BellowAPI.apiVersion() >= 2) BellowAPI.registerGenerator("vitagenesis:caves", new IDeepGenerator() {
     @Override public void generateTerrain(Chunk chunk, int minY, long seed, boolean retrogen) {
         for (int sy = minY >> 4; sy < 0; sy++) {
             ExtendedBlockStorage ebs = BellowAPI.getDeepSection(chunk, sy); // escava: ebs.func_150818_a(x, y & 15, z, Blocks.air)
@@ -164,8 +165,17 @@ Contrato:
   luz, sem vizinhos), função de seed e posição (as bordas dos chunks batem em qualquer ordem de geração).
 * `decorate`: origens no chunk central; escrita no 3×3 por `IDeepRegion.setBlock`, que só aceita `minY..-1`, remove a
   TileEntity antiga e cria a nova na hora (baú, spawner), sem luz nem atualização de vizinhos.
-* `onDecorated`: o mundo inteiro está disponível; é o lugar para acender blocos luminosos colocados sem luz (lava,
-  líquen), por exemplo com `World.func_147451_t`, que exige os chunks a 17 blocos carregados.
+* `decorate`: "depois dos minérios" vale para os veios deste chunk e dos vizinhos decorados antes; um vizinho decorado
+  depois coloca os seus, que podem entrar neste chunk (como na 1.18). Veios nunca substituem ar.
+* `onDecorated`: só o 3×3 em volta tem garantia de estar carregado. Acesso ao `World` mais longe carrega ou gera chunks
+  (e pode decorar outros, chamando `onDecorated` de novo, em cascata). A luz pelo `World` (`func_147451_t`) é
+  ignorada em silêncio sem todos os chunks a 17 blocos carregados (perto da borda, chunks a dois de distância):
+  acenda blocos luminosos quando os chunks em volta estiverem garantidamente carregados (por exemplo quando o 5×5 em
+  volta estiver decorado).
+* A decoração roda no **fim** do `Chunk.onChunkLoad` do chunk que completa o 3×3, já com as TileEntities e entidades
+  dele registradas no mundo (no início, uma TileEntity criada ali entrava duas vezes na lista de ticks: um spawner
+  geraria em dobro). O terreno continua no início, antes do `ChunkEvent.Load`.
+* O reenvio após a decoração inclui os pacotes de descrição das TileEntities das seções alteradas (spawner, placa).
 
 Self-test (`GeneratorProbe`, fase `full`): um gerador de teste escava uma câmara 8×8×8 em 5×5 chunks novos e coloca
 marcadores pela região. Confere: terreno uma vez por chunk novo (49/49); decoração uma vez, depois do terreno dos 9
@@ -425,6 +435,42 @@ inteira abaixo de 0. Não afeta a proteção dos claims.
   −40; o centro da imagem tem de ser céu e a borda da abertura não pode ter faixa preta. Sem a correção da caixa do
   céu, −10 e −40 são reprovados; com ela passa no vanilla e no Angelica.
 
+### 10.1 Segunda auditoria (inspeção por área)
+
+Cinco revisões independentes (persistência, rede/cliente, motor/luz, geração/API, coremod/agent/ferramentas), cada
+achado conferido no código e no fonte do Minecraft/Forge/Crucible antes de corrigir. Confirmados e corrigidos:
+
+| gravidade | defeito | correção | evidência |
+|---|---|---|---|
+| alta | cliente que reentra numa dimensão profunda (Nether → Overworld, ou piso anunciado antes do S01) ficava com o motor de luz do ArchaicFix, que codifica Y em 8 bits: luz abaixo de 0 parava de atualizar no cliente | o tick do cliente instala o motor profundo uma vez por mundo/piso | teste de cliente: depois de ir ao Nether e voltar, um glowstone colocado só no cliente num bolsão escuro a Y −24 dá luz 14 ao lado; sem a correção dá 0 |
+| média | `DeepTiles.restore` alterava a NBT que o Forge entrega ao `loadEntities`; num chunk recarregado com o salvamento ainda na fila, é o mesmo objeto que a thread de I/O grava (gravação sem a chave profunda, `ConcurrentModificationException` ou região corrompida) | o Forge lê uma cópia; o original nunca é alterado | self-test: o compound de entrada fica idêntico |
+| média | TileEntities/entidades abaixo do piso atual (trava perdida, mundo movido entre servidores) derrubavam a carga do chunk (checagem do Hodgepodge) ou sumiam | ficam dormentes no chunk e voltam ao disco intactas, como as seções | self-test: dormentes não carregam e são regravadas |
+| média | decoração no início do `onChunkLoad`: TileEntity criada por um gerador entrava duas vezes na lista de ticks (spawner em dobro) e a antiga não era removida | decoração no fim do `onChunkLoad` | self-test: 25 baús colocados na decoração, cada um uma vez na lista |
+| média | TileEntity de mod criada no cliente ao receber o chunk era invalidada no mesmo pacote (laço final do `fillChunk` do ChunkAPI com `blockMetadata = -1`) | bloco e metadata preenchidos na criação | teste de cliente: barril do EFR abaixo de 0 válido (guarda de regressão: o pacote de descrição do servidor recria a TileEntity, então o teste ponta a ponta não reprova sem a correção; o efeito fica nas TileEntities sem descrição e no Angelica) |
+| média | `//chunk` (sem `-s`) com o agent ia do piso até piso + 255, cortando o topo | `getMaxY` descontado do piso | teste do agent (estrutura do bytecode); sem a correção reprova |
+| média | `tools/crucibletest.sh` podia aprovar uma rodada com o relatório de uma rodada anterior | apaga os relatórios antigos e só lê o da fase | — |
+| baixa–média | formato NBT mais novo (downgrade) perdia TileEntities, entidades e edições abaixo de 0 | versão do ChunkAPI ligada ao formato com aviso de downgrade; dados dormentes; escrita abaixo de 0 recusada nesses chunks | self-test: aviso para o formato 2 |
+| baixa–média | `API_VERSION` era constante de compilação (o `javac` copia o valor para o outro mod) | `BellowAPI.apiVersion()` | — |
+| baixa–média | reenvio após a decoração não mandava os pacotes de descrição das TileEntities | enviados com as seções | — |
+| baixa–média | seção ausente abaixo de 0 respondia luz de céu em `Chunk.getBlockLightValue` | 0, como os outros caminhos | — |
+| baixa–média | renderer vanilla mantinha a geometria profunda de um chunk descarregado no cliente | a marcação de redesenho começa no piso | — |
+| baixa | uma seção ilegível derrubava a carga do chunk inteiro (regenerado) | só ela carrega vazia e é regravada intacta | self-test |
+| baixa | trava do piso: valor de tipo errado virava piso 0; falha ao gravar deixava a trava só na memória; sem `fsync` antes de renomear | recusa, grava antes de guardar no cache, `fsync` | — |
+| baixa | minerador do IC2: o "não encontrado" (−1) é um Y válido abaixo de 0 | "não encontrado" = piso − 1 | — |
+| baixa | portal abaixo de 0 não gerava zumbis-porco; ovo do dragão não caía abaixo de 0 | piso nos testes | self-test |
+| baixa | config `deepBlock` aceitava ar, bloco com TileEntity, bloco que cai ou metadata > 15 sem EndlessIDs | recusados, com aviso | — |
+| baixa | erros de gerador além de `RuntimeException` escapavam; erro na decoração deixava o chunk sem `onDecorated` | isolados e registrados | — |
+| baixa | `DeepChanges` guardava o array de uma edição grande (WorldEdit) por chunk observado | volta ao tamanho base | — |
+| baixa | `/bellow stats 16` em piso fundo podia travar o servidor | raio limitado pelo custo | — |
+| baixa | agent: duas cópias na linha de comando (a antiga ganhava em silêncio); falha de patch parcial só num log genérico | a segunda cópia não arma; aviso de patch parcial explícito | — |
+| baixa | `wgdeep.py` não lia coordenadas em notação científica (região do mapa inteiro) nem ids com aspas | corrigido; cuboide ilegível é marcado | arquivo sintético |
+| baixa | scripts: `pgrep` pegava o `timeout` (dump de threads nunca saía), `rm -rf world` ignorava `level-name`, `sleep` órfão, `build/` inexistente | corrigidos | — |
+
+Controles negativos desta rodada (cada correção desfeita, o teste reprova): o `//chunk` do agent (3 testes), a luz
+calculada só pelo cliente depois da troca de dimensão (luz 0) e a decoração no início do `onChunkLoad` (TileEntity
+duplicada). A luz vinda pelo servidor passava mesmo sem a correção: por isso o teste também coloca um glowstone só
+no cliente.
+
 ## 11. Riscos abertos (beta)
 
 * Crucible: o servidor de produção foi testado (§10), sem jogadores reais conectados; os plugins foram exercitados
@@ -446,7 +492,20 @@ inteira abaixo de 0. Não afeta a proteção dos claims.
   gigantes só crescem com `y >= 1`, cipós param de descer em Y 1; `/setspawn` e `/setworldspawn` aceitam Y 0..256.
 * Retrogen de minérios de outros mods que roda fora de `Chunk.populateChunk` (por exemplo a do CoFH, por tick) não
   passa pela guarda de §5 e pode deixar veios antigos abaixo de 0. No Crucible, os ticks aleatórios profundos usam o
-  `growthOdds` do Spigot deixado pelo último chunk processado.
+  `growthOdds` do Spigot deixado pelo último chunk processado e também tocam chunks na fila de descarregar (o Forge faz
+  o mesmo na superfície).
+* Pacotes: o orçamento por chunk cobre as 32 seções possíveis (≈ 1 MB), independente do piso, porque o cliente não o
+  conhece no registro; o cliente aloca `orçamento × chunks` por S26 (lixo transitório no login e em teleportes, sem
+  efeito de corretude). Um S21 forçado de uma coluna com Y 0..255 totalmente vazio descarrega a coluna no cliente,
+  camada profunda incluída (só em mundos void).
+* A trava do piso é por dimensão no diretório do save: no Crucible cada mundo tem o seu, no Forge é um só; mundos
+  com id de dimensão dinâmico (Multiverse) ou movidos entre servidores podem perder a trava. Desde a segunda auditoria
+  isso não destrói dados (o que fica abaixo do piso fica dormente), mas a camada some até o piso voltar.
+* Fidelidade 1.18: faltam `ore_infested` (montanhas) e as pontas, abaixo de 0, dos veios de terra/granito/diorito/
+  andesito/carvão que começam em Y 0..6 (a faixa ≥ 0 é dos geradores 1.7.10). O teleporte de portal varre até o
+  piso (≈ 1,25× o custo vanilla em −64, ≈ 3× em −512).
+* `MixinWorld_DeepCollision` (Crucible) depende do primeiro `iconst_0` do método; outro mod que injete antes mudaria
+  o alvo (o boot não falharia). Correto com o pack atual.
 * Numa das ~10 rodadas do teste no Crucible de produção (depois desta auditoria), a thread principal parou durante o
   self-test e o servidor não terminou em 40 min; as 4 rodadas seguintes, com o mesmo jar, passaram. A causa não foi
   determinada (o log foi sobrescrito antes de ser analisado; no ambiente de teste o LuckPerms e o voice chat tentam

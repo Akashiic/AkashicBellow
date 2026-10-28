@@ -74,7 +74,13 @@ public class BellowCommand extends CommandBase {
                 return;
             }
             case "stats": {
-                int radius = args.length > 1 ? MathHelper.clamp_int(parseInt(sender, args[1]), 0, 16) : 4;
+                // the scan runs on the main thread: about 20 million blocks at most (radius 16 at -64, 11 at -128, 5 at
+                // -512)
+                int perChunk = Math.max(1, -BellowAPI.getMinY(world) << 8);
+                int maxRadius = Math.max(0, (int) ((Math.sqrt(20_000_000.0 / perChunk) - 1) / 2));
+                int radius = args.length > 1
+                    ? MathHelper.clamp_int(parseInt(sender, args[1]), 0, Math.min(16, maxRadius))
+                    : Math.min(4, maxRadius);
                 Map<String, long[]> counts = SelfTest.histogram(world, x >> 4, z >> 4, radius);
                 say(
                     sender,

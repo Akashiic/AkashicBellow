@@ -60,6 +60,8 @@ public final class DeepChanges {
         this.count = 0;
         this.slotMask = 0;
         this.seen = null;
+        // a big edit (WorldEdit below 0) grows this to 16 x 16 x depth entries; do not keep that per watched chunk
+        if (this.positions.length > LINEAR_LIMIT) this.positions = new int[LINEAR_LIMIT];
     }
 
     /** Sets the bit of a packed position; false if it was already set. */

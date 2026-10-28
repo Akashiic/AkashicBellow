@@ -100,7 +100,13 @@ public final class DeepDecorator {
         // claimed before decorating: a chunk load from inside the stage (a generator using the World) that completes
         // this neighbourhood again must not decorate it a second time
         ((IDeepChunk) centre).bellow$setGenState(DeepConstants.GEN_DECORATED);
-        decorate(world, region, cx, cz, minY);
+        try {
+            decorate(world, region, cx, cz, minY);
+        } catch (RuntimeException e) {
+            // the claim stands (a retry would place the same veins twice); what was placed is kept and the chunk
+            // loads normally instead of failing the chunk load
+            AkashicBellow.LOG.error("Deep decoration of chunk [{}, {}] failed; keeping what was placed", cx, cz, e);
+        }
         centre.setChunkModified();
         DeepGenerators.onDecorated(world, centre);
     }

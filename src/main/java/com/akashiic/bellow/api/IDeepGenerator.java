@@ -41,6 +41,9 @@ public interface IDeepGenerator {
      * may reach the 8 neighbours (all have their terrain) through {@link IDeepRegion#setBlock}, which only writes
      * {@code minY..-1} and sends the changes to players. No light updates here either.
      * <p>
+     * "After Bellow's ores" covers the veins of this chunk and of neighbours decorated before it; a neighbour decorated
+     * later places its own veins, which may reach into this chunk (as in 1.18). Veins never replace air.
+     * <p>
      * When a generator is added to a world that already has deep layers, the chunks at the edge of what was generated
      * before (terrain done, not yet decorated) reach this step without having gone through this generator's
      * {@link #generateTerrain}: decorate what is found rather than assuming it.
@@ -48,9 +51,12 @@ public interface IDeepGenerator {
     default void decorate(IDeepRegion region) {}
 
     /**
-     * After the chunk was marked decorated and its changed sections were sent. The world is fully usable here: this is
-     * the place to light blocks placed without light (for instance with {@code World.func_147451_t}, which needs the
-     * chunks within 17 blocks loaded), or to schedule block ticks.
+     * After the chunk was marked decorated and its changed sections (and their tile entities) were sent. Only the 3x3
+     * around the chunk is guaranteed loaded: World access further out loads or generates chunks (which can decorate
+     * more chunks, and call this again, in a cascade). Light updates through the World ({@code World.func_147451_t})
+     * are silently skipped unless every chunk within 17 blocks is loaded, which near a chunk edge means chunks two
+     * away: light blocks placed without light when the chunks around them are known to be loaded (for instance once
+     * the 5x5 around a chunk is decorated), not blindly here.
      */
     default void onDecorated(WorldServer world, Chunk chunk) {}
 }

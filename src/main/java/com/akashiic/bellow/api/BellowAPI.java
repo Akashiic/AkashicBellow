@@ -19,9 +19,15 @@ public final class BellowAPI {
 
     /**
      * Version of this API, raised whenever something is added. 2: deep generators ({@link #registerGenerator}) and
-     * {@link #resendDeepSections}. Check it at runtime rather than parsing the mod version.
+     * {@link #resendDeepSections}. Read at runtime: call {@link #apiVersion()} (a mod compiled against version 2 that
+     * runs with version 1 gets a {@code NoSuchMethodError} it can catch, instead of a value copied in at compile time).
      */
-    public static final int API_VERSION = 2;
+    public static int apiVersion() {
+        return 2;
+    }
+
+    /** Same as {@link #apiVersion()}; not a compile-time constant, so javac does not copy it into other mods. */
+    public static final int API_VERSION = apiVersion();
 
     private BellowAPI() {}
 

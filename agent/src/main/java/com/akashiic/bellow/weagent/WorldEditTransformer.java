@@ -51,7 +51,15 @@ final class WorldEditTransformer implements ClassFileTransformer {
         } catch (ThreadDeath | VirtualMachineError e) {
             throw e;
         } catch (Throwable t) {
-            report("Patch rejected for " + name + "; original bytecode retained: " + t + dump(name, bytes));
+            // The jar was verified, so another transformer changed this class: the rest of WorldEdit may already be
+            // patched, which leaves it half-patched (selects below 0 but refuses to edit there, or the reverse).
+            report(
+                "Patch rejected for " + name
+                    + "; original bytecode retained: "
+                    + t
+                    + ". WorldEdit is now only partly patched below Y 0: remove the transformer that changes this class"
+                    + " or the agent."
+                    + dump(name, bytes));
             return null;
         }
     }

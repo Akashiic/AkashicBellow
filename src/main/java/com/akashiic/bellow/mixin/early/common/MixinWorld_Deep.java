@@ -9,6 +9,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import com.akashiic.bellow.api.IDeepWorld;
 import com.akashiic.bellow.compat.archaic.DeepLightingInstaller;
 import com.akashiic.bellow.core.Compat;
+import com.akashiic.bellow.storage.DeepDataManager;
 import com.akashiic.bellow.world.ClientFloors;
 import com.akashiic.bellow.world.DeepWorlds;
 import com.akashiic.bellow.world.LegacyGeneration;
@@ -108,6 +109,13 @@ public abstract class MixinWorld_Deep implements IDeepWorld {
 
     // -------------------------------------------------------------- y < 0
 
+    /** Deep data of a newer format is read-only in this session: a write there would be dropped on save. */
+    @Unique
+    private boolean bellow$frozen(int x, int z) {
+        return DeepDataManager.anyNewer()
+            && DeepDataManager.isNewer(((World) (Object) this).getChunkFromChunkCoords(x >> 4, z >> 4));
+    }
+
     @Definition(id = "y", local = @Local(type = int.class, argsOnly = true, ordinal = 1))
     @Expression("y < 0")
     @ModifyExpressionValue(
@@ -115,8 +123,9 @@ public abstract class MixinWorld_Deep implements IDeepWorld {
         at = @At("MIXINEXTRAS:EXPRESSION"),
         require = 1,
         allow = 1)
-    private boolean bellow$belowFloor0(boolean original, @Local(argsOnly = true, ordinal = 1) int y) {
-        return y < this.bellow$getMinY() || y < 0 && LegacyGeneration.active();
+    private boolean bellow$belowFloor0(boolean original, @Local(argsOnly = true, ordinal = 0) int x,
+        @Local(argsOnly = true, ordinal = 1) int y, @Local(argsOnly = true, ordinal = 2) int z) {
+        return y < this.bellow$getMinY() || y < 0 && (LegacyGeneration.active() || this.bellow$frozen(x, z));
     }
 
     @Definition(id = "y", local = @Local(type = int.class, argsOnly = true, ordinal = 1))
@@ -137,8 +146,9 @@ public abstract class MixinWorld_Deep implements IDeepWorld {
         at = @At("MIXINEXTRAS:EXPRESSION"),
         require = 1,
         allow = 1)
-    private boolean bellow$belowFloor2(boolean original, @Local(argsOnly = true, ordinal = 1) int y) {
-        return y < this.bellow$getMinY() || y < 0 && LegacyGeneration.active();
+    private boolean bellow$belowFloor2(boolean original, @Local(argsOnly = true, ordinal = 0) int x,
+        @Local(argsOnly = true, ordinal = 1) int y, @Local(argsOnly = true, ordinal = 2) int z) {
+        return y < this.bellow$getMinY() || y < 0 && (LegacyGeneration.active() || this.bellow$frozen(x, z));
     }
 
     @Definition(id = "y", local = @Local(type = int.class, argsOnly = true, ordinal = 1))

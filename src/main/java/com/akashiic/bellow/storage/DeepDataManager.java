@@ -72,9 +72,10 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
         return ID;
     }
 
+    /** The NBT format version: ChunkAPI records it in level.dat and asks {@link #versionChangeMessage} on a change. */
     @Override
     public @NotNull String version() {
-        return "1";
+        return Integer.toString(NBT_VERSION);
     }
 
     @Override
@@ -91,7 +92,18 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
 
     @Override
     public @Nullable String versionChangeMessage(String priorVersion) {
-        return null;
+        int prior;
+        try {
+            prior = Integer.parseInt(priorVersion);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        if (prior <= NBT_VERSION) return null;
+        return "This world was saved by a newer Akashic Bellow (deep data format " + prior
+            + ", this version reads "
+            + NBT_VERSION
+            + "). Its chunks keep their deep data on disk, but nothing below Y 0 is loaded: no blocks, tile entities"
+            + " or entities there until the newer version is installed again.";
     }
 
     // ------------------------------------------------------------------ NBT
@@ -102,6 +114,24 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
      */
     private static final Map<Chunk, NBTTagCompound> NEWER = Collections.synchronizedMap(new WeakHashMap<>());
     private static boolean warnedNewer;
+
+    private static volatile boolean anyNewer;
+
+    /** Deep data of this chunk is of a newer format: nothing below Y 0 is loaded (see {@link DeepTiles}). */
+    public static boolean isNewer(Chunk chunk) {
+        return anyNewer && NEWER.containsKey(chunk);
+    }
+
+    /** Whether any chunk of a newer format was read in this session (keeps the World write check free otherwise). */
+    public static boolean anyNewer() {
+        return anyNewer;
+    }
+
+    /**
+     * Sections that could not be read, per slot, kept verbatim and written back while the slot stays empty: one bad
+     * section must not cost the chunk (an exception here fails the whole chunk load, and Forge regenerates it).
+     */
+    private static final Map<Chunk, NBTTagCompound[]> UNREADABLE = Collections.synchronizedMap(new WeakHashMap<>());
 
     @Override
     public void writeChunkToNBT(Chunk chunk, NBTTagCompound nbt) {
@@ -117,11 +147,15 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
         nbt.setByte("V", NBT_VERSION);
         nbt.setByte("Gen", deep.bellow$getGenState());
         ExtendedBlockStorage[] sections = deep.bellow$peekDeepSections();
-        if (sections == null) return;
+        NBTTagCompound[] unreadable = UNREADABLE.get(chunk);
+        if (sections == null && unreadable == null) return;
         NBTTagList list = new NBTTagList();
-        for (int slot = 0; slot < sections.length; slot++) {
-            ExtendedBlockStorage ebs = sections[slot];
-            if (ebs == null) continue;
+        for (int slot = 0; slot < DeepConstants.MAX_DEEP_SECTIONS; slot++) {
+            ExtendedBlockStorage ebs = sections == null ? null : sections[slot];
+            if (ebs == null) {
+                if (unreadable != null && unreadable[slot] != null) list.appendTag(unreadable[slot].copy());
+                continue;
+            }
             NBTTagCompound tag = new NBTTagCompound();
             tag.setByte("Y", (byte) (slot - DeepConstants.MAX_DEEP_SECTIONS));
             DataRegistryImpl.writeSubChunkToNBT(chunk, ebs, tag);
@@ -137,6 +171,7 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
         deep.bellow$setFromDisk(true);
         if (nbt.hasKey("V") && nbt.getByte("V") > NBT_VERSION) {
             NEWER.put(chunk, (NBTTagCompound) nbt.copy());
+            anyNewer = true;
             deep.bellow$setGenState(DeepConstants.GEN_DECORATED);
             if (!warnedNewer) {
                 warnedNewer = true;
@@ -169,8 +204,21 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
                 continue;
             }
             ExtendedBlockStorage ebs = new ExtendedBlockStorage(sectionY << 4, hasSky);
-            DataRegistryImpl.readSubChunkFromNBT(chunk, ebs, tag);
-            ebs.removeInvalidBlocks();
+            try {
+                DataRegistryImpl.readSubChunkFromNBT(chunk, ebs, tag);
+                ebs.removeInvalidBlocks();
+            } catch (RuntimeException e) {
+                AkashicBellow.LOG.error(
+                    "Chunk [{}, {}]: deep section Y {} cannot be read; it is kept unchanged on disk and loads as empty",
+                    chunk.xPosition,
+                    chunk.zPosition,
+                    sectionY,
+                    e);
+                NBTTagCompound[] bad = UNREADABLE.get(chunk);
+                if (bad == null) UNREADABLE.put(chunk, bad = new NBTTagCompound[DeepConstants.MAX_DEEP_SECTIONS]);
+                bad[slot] = (NBTTagCompound) tag.copy();
+                continue;
+            }
             sections[slot] = ebs;
         }
         deep.bellow$setDeepSections(sections);
@@ -178,6 +226,13 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
 
     @Override
     public void cloneChunk(Chunk from, Chunk to) {
+        NBTTagCompound newer = NEWER.get(from);
+        if (newer != null) {
+            NEWER.put(to, (NBTTagCompound) newer.copy());
+            anyNewer = true;
+        }
+        NBTTagCompound[] unreadable = UNREADABLE.get(from);
+        if (unreadable != null) UNREADABLE.put(to, unreadable.clone());
         IDeepChunk src = (IDeepChunk) from;
         IDeepChunk dst = (IDeepChunk) to;
         dst.bellow$setGenState(src.bellow$getGenState());
@@ -317,6 +372,10 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
                 te.xCoord = (chunk.xPosition << 4) + x;
                 te.yCoord = baseY + y;
                 te.zCoord = (chunk.zPosition << 4) + z;
+                // ChunkAPI's fillChunk ends by invalidating every tile entity whose cached block or metadata differs
+                // from the chunk (blockMetadata starts at -1), which Forge's shouldRefresh confirms for modded ones
+                te.blockType = block;
+                te.blockMetadata = meta;
                 if (Compat.angelica) AngelicaTiles.awaitDescriptor(te);
                 chunk.addTileEntity(te);
             }

@@ -78,6 +78,8 @@ public class BellowCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
         mixins.add("common.MixinBlockPortalSize_Deep");
         mixins.add(Compat.crucible ? "crucible.MixinTeleporter_DeepCrucible" : "common.MixinTeleporter_Deep");
         mixins.add("common.MixinEntityEnderman_Deep");
+        mixins.add("common.MixinBlockPortal_DeepSpawn");
+        mixins.add("common.MixinBlockDragonEgg_Deep");
         mixins.add("common.MixinBlockFluidFinite_Deep");
 
         if (FMLLaunchHandler.side()
@@ -86,6 +88,7 @@ public class BellowCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
             mixins.add("client.MixinChunkCache_DeepClient");
             mixins.add("client.MixinEntityRenderer_DeepFog");
             mixins.add("client.MixinWorldClient_DeepParticles");
+            mixins.add("client.MixinWorldClient_DeepUnload");
             mixins.add("client.MixinRenderGlobal_DeepSky");
             // Angelica (Celeritas) replaces terrain rendering; it gets its own late compat mixins.
             if (!EnvironmentDetector.classExists("com.gtnewhorizons.angelica.AngelicaMod")) {

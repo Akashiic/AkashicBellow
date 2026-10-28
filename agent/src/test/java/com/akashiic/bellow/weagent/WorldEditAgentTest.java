@@ -51,7 +51,7 @@ class WorldEditAgentTest {
         EDITS.put(we + "world/AbstractWorld", 1);
         EDITS.put(we + "bukkit/selections/Polygonal2DSelection", 2);
         EDITS.put(we + "bukkit/selections/CylinderSelection", 2);
-        EDITS.put(we + "command/SelectionCommands", 4);
+        EDITS.put(we + "command/SelectionCommands", 5);
         EDITS.put(we + "command/UtilityCommands", 2);
         EDITS.put(we + "EditSession", 5);
         EDITS.put(we + "util/TargetBlock", 1);
@@ -73,6 +73,37 @@ class WorldEditAgentTest {
                 assertThrows(IllegalStateException.class, () -> new Patcher(out), "second pass " + e.getKey());
             }
         }
+    }
+
+    /** {@code //chunk} without {@code -s}: the top corner is {@code min + maxY - floor}, not {@code min + maxY}. */
+    @Test
+    void chunkSelectionEndsAtTheTop() throws Exception {
+        assumeTrue(WE_JAR != null, "bellow.weJar not set");
+        String name = WorldEditPatches.WE + "command/SelectionCommands";
+        byte[] out;
+        try (JarFile jar = new JarFile(WE_JAR)) {
+            Patcher p = new Patcher(read(jar, name + ".class"));
+            WorldEditPatches.TARGETS.get(name).patch.apply(p);
+            out = p.finish();
+        }
+        org.objectweb.asm.tree.ClassNode cls = new org.objectweb.asm.tree.ClassNode();
+        new ClassReader(out).accept(cls, 0);
+        int corrected = 0;
+        for (org.objectweb.asm.tree.MethodNode m : cls.methods) {
+            if (!m.name.equals("chunk")) continue;
+            for (org.objectweb.asm.tree.AbstractInsnNode n = m.instructions.getFirst(); n != null; n = n.getNext()) {
+                if (!(n instanceof org.objectweb.asm.tree.MethodInsnNode)
+                    || !((org.objectweb.asm.tree.MethodInsnNode) n).name.equals("getMaxY")) continue;
+                org.objectweb.asm.tree.AbstractInsnNode load = n.getNext(), helper = load.getNext(), sub = helper.getNext();
+                boolean floorSubtracted = load.getOpcode() == org.objectweb.asm.Opcodes.ALOAD
+                    && helper instanceof org.objectweb.asm.tree.MethodInsnNode
+                    && ((org.objectweb.asm.tree.MethodInsnNode) helper).name.equals(Patcher.HELPER)
+                    && sub.getOpcode() == org.objectweb.asm.Opcodes.ISUB;
+                if (floorSubtracted) corrected++;
+            }
+        }
+        // two getMaxY calls in chunk(): -s uses it as an absolute Y (kept), the other as a height above the floor
+        assertEquals(1, corrected);
     }
 
     /**

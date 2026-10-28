@@ -169,6 +169,9 @@ public final class ClientSelfTest {
                 case 12: // sky seen from an open pit at several heights, down to the deep layer
                     this.skyStep(mc);
                     break;
+                case 13: // to the Nether and back: the new client world must light the deep layer
+                    this.tripStep(mc);
+                    break;
                 default:
                     break;
             }
@@ -255,9 +258,61 @@ public final class ClientSelfTest {
                 this.camActive = false;
                 mc.gameSettings.fovSetting = 70.0F;
                 mc.gameSettings.hideGUI = false;
-                this.finish(mc);
+                this.oldWorld = mc.theWorld;
+                // nothing to look at from here on (light values only): software GL renders a far view very slowly
+                mc.gameSettings.renderDistanceChunks = 3;
+                mc.gameSettings.hideGUI = true;
+                this.tripRequested = true;
+                this.state = 13;
+                this.timer = 0;
             }
         }
+    }
+
+    // Dimension trip: the client world created when coming back reads its floor at once; its lighting engine must
+    // still handle Y < 0 (with ArchaicFix's Phosphor, the stock engine drops every light update below 0).
+    private Object oldWorld;
+    private volatile boolean tripRequested;
+    private volatile int tripStage; // server side: 1 in the Nether, 2 back, 3 cavity carved, 4 glowstone placed
+    private int tripTicks;
+    private int tripClientTicks;
+    private int cavityX, cavityY, cavityZ;
+    private volatile boolean glowRequested;
+
+    private void tripStep(Minecraft mc) {
+        if (++this.tripClientTicks % 100 == 0) AkashicBellow.LOG.info(
+            "[clienttest] trip client: stage {} dim {} new world {} cavity block {}",
+            this.tripStage,
+            mc.theWorld.provider.dimensionId,
+            mc.theWorld != this.oldWorld,
+            mc.theWorld.getBlock(this.cavityX, this.cavityY, this.cavityZ));
+        if (this.tripStage < 3 || mc.theWorld == this.oldWorld || mc.theWorld.provider.dimensionId != 0) return;
+        if (!this.glowRequested) {
+            // the client has the carved (dark) cavity: now the glowstone, placed by the server, arrives as a change
+            if (mc.theWorld.getBlock(this.cavityX, this.cavityY, this.cavityZ) == Blocks.air) this.glowRequested = true;
+            return;
+        }
+        if (this.tripStage < 4 || ++this.timer < 40) return;
+        int light = mc.theWorld
+            .getSavedLightValue(net.minecraft.world.EnumSkyBlock.Block, this.cavityX + 1, this.cavityY, this.cavityZ);
+        String engine = com.akashiic.bellow.core.Compat.phosphor
+            ? com.akashiic.bellow.compat.archaic.DeepLightingInstaller.engineOf(mc.theWorld)
+            : "vanilla";
+        this.check(
+            "client lights the deep layer after a dimension change",
+            light == 14 && mc.theWorld.getBlock(this.cavityX, this.cavityY, this.cavityZ) == Blocks.glowstone,
+            "block light next to a glowstone at Y " + this.cavityY + ": " + light + " (engine " + engine + ")");
+        // the same, computed by the client alone: a glowstone placed only in the client world, in a second cavity
+        int ox = this.cavityX, oy = this.cavityY, oz = this.cavityZ + 6;
+        boolean dark = mc.theWorld.getBlock(ox, oy, oz) == Blocks.air
+            && mc.theWorld.getSavedLightValue(net.minecraft.world.EnumSkyBlock.Block, ox + 1, oy, oz) == 0;
+        mc.theWorld.setBlock(ox, oy, oz, Blocks.glowstone, 0, 3);
+        int own = mc.theWorld.getSavedLightValue(net.minecraft.world.EnumSkyBlock.Block, ox + 1, oy, oz);
+        this.check(
+            "client light engine works below Y 0 on its own",
+            dark && own == 14,
+            "dark before " + dark + ", block light next to a client-only glowstone at Y " + oy + ": " + own);
+        this.finish(mc);
     }
 
     /** 25 x 25 pit, open from just above the floor to the sky, far from where the client has been. */
@@ -275,6 +330,47 @@ public final class ClientSelfTest {
         }
         // a marker in the wall: the client has the pit once it sees this stone and air at the centre
         for (int y = minY + 4; y < 0; y++) w.setBlock(this.px + 13, y, this.pz, Blocks.stone, 0, 2);
+    }
+
+    private void serverTrip() {
+        MinecraftServer server = MinecraftServer.getServer();
+        net.minecraft.server.management.ServerConfigurationManager players = server.getConfigurationManager();
+        EntityPlayerMP p = (EntityPlayerMP) players.playerEntityList.get(0);
+        this.tripTicks++;
+        if (this.tripTicks % 100 == 1)
+            AkashicBellow.LOG.info("[clienttest] trip stage {} tick {}", this.tripStage, this.tripTicks);
+        if (this.tripStage == 0) {
+            players.transferPlayerToDimension(p, -1);
+            this.tripStage = 1;
+            this.tripTicks = 0;
+        } else if (this.tripStage == 1 && this.tripTicks > 100) {
+            players.transferPlayerToDimension(p, 0);
+            this.tripStage = 2;
+            this.tripTicks = 0;
+        } else if (this.tripStage == 2 && this.tripTicks > 40) {
+            WorldServer w = server.worldServerForDimension(0);
+            int minY = BellowAPI.getMinY(w);
+            // a sealed dark cavity next to the first deep room (its chunks are around the player again)
+            this.cavityX = this.x0 + 20;
+            this.cavityY = minY + 40;
+            this.cavityZ = this.z0;
+            for (int c = 0; c <= 6; c += 6) { // two sealed cavities: one lit by the server, one by the client alone
+                for (int dx = -2; dx <= 2; dx++) for (int dy = -2; dy <= 2; dy++) for (int dz = -2; dz <= 2; dz++) {
+                    boolean shell = Math.abs(dx) == 2 || Math.abs(dy) == 2 || Math.abs(dz) == 2;
+                    w.setBlock(
+                        this.cavityX + dx,
+                        this.cavityY + dy,
+                        this.cavityZ + c + dz,
+                        shell ? Blocks.stone : Blocks.air);
+                }
+            }
+            p.playerNetServerHandler.setPlayerLocation(this.x0 + 0.5, this.y0 + 1, this.z0 + 0.5, 0.0F, 0.0F);
+            this.tripStage = 3;
+        } else if (this.tripStage == 3 && this.glowRequested) {
+            server.worldServerForDimension(0)
+                .setBlock(this.cavityX, this.cavityY, this.cavityZ, Blocks.glowstone);
+            this.tripStage = 4;
+        }
     }
 
     @SubscribeEvent
@@ -300,6 +396,10 @@ public final class ClientSelfTest {
             w.setBlock(this.x0 - 2, top, this.z0 + 3, Blocks.wool, 14, 3);
             p.playerNetServerHandler.setPlayerLocation(this.x0 + 0.5, top, this.z0 - 0.5, 0.0F, 30.0F);
             this.surfaceReady = true;
+            return;
+        }
+        if (event.phase == TickEvent.Phase.END && this.tripRequested) {
+            this.serverTrip();
             return;
         }
         if (event.phase == TickEvent.Phase.END && this.skyRequested && !this.skyReady) {
@@ -375,6 +475,9 @@ public final class ClientSelfTest {
             sign.markDirty();
         }
         world.setBlock(this.x0 + 2, this.y0, this.z0 + 3, Blocks.chest);
+        // a modded tile entity (Forge's shouldRefresh invalidates those when their cached metadata does not match)
+        Block barrel = cpw.mods.fml.common.registry.GameRegistry.findBlock("etfuturum", "barrel");
+        if (barrel != null) world.setBlock(this.x0 + 4, this.y0, this.z0 + 3, barrel, 1, 3);
         world.setBlock(this.x0 - 2, this.y0, this.z0 + 3, Blocks.wool, 14, 3);
 
         // Wall torch placed the way a player does it: right click the north face (side 2) of the south wall block.
@@ -428,6 +531,20 @@ public final class ClientSelfTest {
         Object chestTe = mc.theWorld.getChunkFromBlockCoords(cx, cz).chunkTileEntityMap
             .get(new net.minecraft.world.ChunkPosition(cx & 15, this.y0, cz & 15));
         this.check("client tile entity below Y 0 (created on receipt)", chestTe != null, String.valueOf(chestTe));
+        if (cpw.mods.fml.common.registry.GameRegistry.findBlock("etfuturum", "barrel") != null) {
+            int bx = this.x0 + 4;
+            Object barrelTe = mc.theWorld.getChunkFromBlockCoords(bx, cz).chunkTileEntityMap
+                .get(new net.minecraft.world.ChunkPosition(bx & 15, this.y0, cz & 15));
+            this.check(
+                "modded client tile entity below Y 0 stays valid",
+                barrelTe instanceof net.minecraft.tileentity.TileEntity
+                    && !((net.minecraft.tileentity.TileEntity) barrelTe).isInvalid(),
+                String.valueOf(barrelTe) + (barrelTe instanceof net.minecraft.tileentity.TileEntity
+                    ? " invalid=" + ((net.minecraft.tileentity.TileEntity) barrelTe).isInvalid()
+                    : ""));
+        } else {
+            this.out.add("INFO etfuturum:barrel not present: modded client tile entity not checked");
+        }
         int lx = this.x0 + 6, ly = this.y0 + 1, lz = this.z0 + 6;
         int light = mc.theWorld.getSavedLightValue(net.minecraft.world.EnumSkyBlock.Block, lx, ly, lz);
         int serverLight = server.getSavedLightValue(net.minecraft.world.EnumSkyBlock.Block, lx, ly, lz);

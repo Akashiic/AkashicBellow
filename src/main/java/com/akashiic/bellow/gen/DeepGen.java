@@ -25,8 +25,11 @@ public final class DeepGen {
         IDeepChunk deep = (IDeepChunk) chunk;
         if (deep.bellow$getGenState() == DeepConstants.GEN_NONE) {
             // fromDisk && state NONE: chunk saved before the install (or before this dimension was enabled).
-            if (deep.bellow$isFromDisk() && !GenConfig.retrogen) return;
+            boolean retrogen = deep.bellow$isFromDisk();
+            if (retrogen && !GenConfig.retrogen) return;
             DeepTerrain.fill(chunk, minY, world.getSeed());
+            // deep generators carve the freshly filled layer, before any ore of the 3x3 stage (1.18: carvers first)
+            DeepGenerators.generateTerrain(chunk, minY, world.getSeed(), retrogen);
             deep.bellow$setGenState(DeepConstants.GEN_TERRAIN);
         }
         DeepDecorator.tryAround((WorldServer) world, chunk, minY);

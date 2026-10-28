@@ -9,6 +9,7 @@ import org.apache.logging.log4j.Logger;
 import com.akashiic.bellow.api.BellowAPI;
 import com.akashiic.bellow.gen.DeepBlocks;
 import com.akashiic.bellow.gen.DeepDecorator;
+import com.akashiic.bellow.gen.DeepGenerators;
 import com.akashiic.bellow.net.DimensionInfoMessage;
 import com.akashiic.bellow.storage.DeepDataManager;
 import com.akashiic.bellow.world.DeepWorlds;
@@ -21,6 +22,7 @@ import cpw.mods.fml.common.Mod;
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
+import cpw.mods.fml.common.event.FMLServerAboutToStartEvent;
 import cpw.mods.fml.common.event.FMLServerStartedEvent;
 import cpw.mods.fml.common.event.FMLServerStartingEvent;
 import cpw.mods.fml.common.event.FMLServerStoppedEvent;
@@ -78,6 +80,10 @@ public class AkashicBellow {
             && "chunkload".equals(System.getProperty("akashicbellow.selftest.phase"))) {
             com.akashiic.bellow.selftest.ChunkLoadProbe.registerCallback();
         }
+        if (Boolean.getBoolean("akashicbellow.selftest")
+            && "full".equals(System.getProperty("akashicbellow.selftest.phase", "full"))) {
+            com.akashiic.bellow.selftest.GeneratorProbe.register();
+        }
         // Registered after EndlessIDs (dependency ordering), so the per-section packet budget already accounts for it.
         DataRegistry.registerDataManager(new DeepDataManager());
     }
@@ -86,6 +92,12 @@ public class AkashicBellow {
     public void postInit(FMLPostInitializationEvent event) {
         DeepBlocks.resolve();
         DeepDecorator.resolve();
+    }
+
+    /** Deep generators are fixed from here on: every chunk of the session sees the same list. */
+    @Mod.EventHandler
+    public void serverAboutToStart(FMLServerAboutToStartEvent event) {
+        DeepGenerators.freeze();
     }
 
     @Mod.EventHandler

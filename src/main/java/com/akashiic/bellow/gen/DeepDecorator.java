@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Random;
 
 import net.minecraft.block.Block;
-import net.minecraft.util.LongHashMap;
 import net.minecraft.world.WorldServer;
 import net.minecraft.world.biome.BiomeGenBase;
 import net.minecraft.world.chunk.Chunk;
@@ -14,13 +13,12 @@ import net.minecraftforge.common.BiomeDictionary;
 
 import com.akashiic.bellow.AkashicBellow;
 import com.akashiic.bellow.GenConfig;
+import com.akashiic.bellow.api.BellowAPI;
 import com.akashiic.bellow.api.DeepConstants;
 import com.akashiic.bellow.api.IDeepChunk;
 import com.akashiic.bellow.gen.ore.DeepFeature;
 import com.akashiic.bellow.gen.ore.DeepFeatures;
 import com.akashiic.bellow.gen.ore.OreFeature;
-import com.akashiic.bellow.mixin.early.common.PlayerManagerAccessor;
-import com.akashiic.bellow.net.IDeepPlayerInstance;
 
 import cpw.mods.fml.common.registry.GameRegistry;
 
@@ -69,9 +67,12 @@ public final class DeepDecorator {
         features = out;
     }
 
-    /** Try every chunk whose 3x3 neighbourhood may have just been completed by {@code loaded}. */
+    /**
+     * Try every chunk whose 3x3 neighbourhood may have just been completed by {@code loaded}. The stage runs when there
+     * is something to place: ores, or a registered deep generator.
+     */
     public static void tryAround(WorldServer world, Chunk loaded, int minY) {
-        if (!GenConfig.ores) return;
+        if (!GenConfig.ores && !DeepGenerators.any()) return;
         for (int dz = -1; dz <= 1; dz++) {
             for (int dx = -1; dx <= 1; dx++) {
                 tryDecorate(world, loaded, loaded.xPosition + dx, loaded.zPosition + dz, minY);
@@ -96,18 +97,36 @@ public final class DeepDecorator {
                 region[(dz + 1) * 3 + dx + 1] = c;
             }
         }
-        decorate(world, region, cx, cz, minY);
+        // claimed before decorating: a chunk load from inside the stage (a generator using the World) that completes
+        // this neighbourhood again must not decorate it a second time
         ((IDeepChunk) centre).bellow$setGenState(DeepConstants.GEN_DECORATED);
+        decorate(world, region, cx, cz, minY);
         centre.setChunkModified();
+        DeepGenerators.onDecorated(world, centre);
     }
 
     static void decorate(WorldServer world, Chunk[] region, int cx, int cz, int minY) {
-        DeepRegion view = new DeepRegion(region, cx, cz, minY);
         long seed = world.getSeed();
+        DeepRegion view = new DeepRegion(world, seed, region, cx, cz, minY);
+        if (GenConfig.ores) placeFeatures(world, view, seed, cx, cz, minY);
+
+        // after the ores, like 1.18 features after its ore features; their writes are sent with the ores'
+        DeepGenerators.decorate(view, region[4]);
+
+        for (int i = 0; i < 9; i++) {
+            int slots = view.touchedSlots(i);
+            if (slots == 0) continue;
+            Chunk c = view.chunk(i);
+            c.setChunkModified();
+            BellowAPI.resendDeepSections(world, c, slots);
+        }
+    }
+
+    private static void placeFeatures(WorldServer world, DeepRegion view, long seed, int cx, int cz, int minY) {
         Random random = new Random();
         int baseX = cx << 4;
         int baseZ = cz << 4;
-        Chunk centre = region[4];
+        Chunk centre = view.chunk(4);
 
         for (Resolved r : features) {
             DeepFeature f = r.feature;
@@ -133,14 +152,6 @@ public final class DeepDecorator {
                 OreFeature.place(random, x, y, z, f.size, f.discardOnAir, view);
             }
         }
-
-        for (int i = 0; i < 9; i++) {
-            int slots = view.touchedSlots(i);
-            if (slots == 0) continue;
-            Chunk c = view.chunk(i);
-            c.setChunkModified();
-            resendToWatchers(world, c, slots);
-        }
     }
 
     /** Whether a vein of {@code size} with its origin at {@code y} can put blocks in {@code [minY, -1]}. */
@@ -151,13 +162,5 @@ public final class DeepDecorator {
 
     private static boolean isMountain(BiomeGenBase biome) {
         return biome != null && BiomeDictionary.isBiomeOfType(biome, BiomeDictionary.Type.MOUNTAIN);
-    }
-
-    /** Players that already received the chunk get the changed deep sections again. */
-    private static void resendToWatchers(WorldServer world, Chunk chunk, int slots) {
-        LongHashMap instances = ((PlayerManagerAccessor) world.getPlayerManager()).bellow$getPlayerInstances();
-        long key = (long) chunk.xPosition + 2147483647L | (long) chunk.zPosition + 2147483647L << 32;
-        Object instance = instances.getValueByKey(key);
-        if (instance != null) ((IDeepPlayerInstance) instance).bellow$resendDeep(slots);
     }
 }

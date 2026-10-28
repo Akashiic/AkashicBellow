@@ -113,6 +113,71 @@ comportamento da 1.7.10 (recusados). A geração profunda escreve direto nas se�
 Os avisos "cascading worldgen" do ArchaicFix vistos nos testes aparecem também com a nossa geração desligada
 (36 na fase bootstrap do teste) e são emitidos dentro do `populate` vanilla — não vêm deste mod.
 
+### 5.1 Geradores profundos (API)
+
+Outros mods (por exemplo o VitaGenesis, cavernas da 1.18) entram na geração do subsolo por
+`BellowAPI.registerGenerator(id, IDeepGenerator)`. Ordem para um chunk, espelhando a 1.18 (carvers antes das
+features):
+
+1. Bellow preenche a camada profunda (bloco profundo, piso de bedrock) e troca a bedrock legada.
+2. `generateTerrain(chunk, minY, seed, retrogen)` de cada gerador, na ordem de registro, dentro do mesmo
+   `Chunk.onChunkLoad`, antes de o estado virar TERRAIN.
+3. Quando o chunk e os 8 vizinhos têm TERRAIN: minérios, tufo e cascalho do Bellow (os veios que descartam ao tocar ar
+   respeitam o que foi escavado no passo 2), depois `decorate(IDeepRegion)` de cada gerador.
+4. Estado DECORATED gravado, seções alteradas (minérios e geradores juntos) reenviadas aos jogadores que já tinham o
+   chunk, depois `onDecorated(world, chunk)`.
+
+```java
+// postInit (o mod declara required-after:akashicbellow)
+if (BellowAPI.API_VERSION >= 2) BellowAPI.registerGenerator("vitagenesis:caves", new IDeepGenerator() {
+    @Override public void generateTerrain(Chunk chunk, int minY, long seed, boolean retrogen) {
+        for (int sy = minY >> 4; sy < 0; sy++) {
+            ExtendedBlockStorage ebs = BellowAPI.getDeepSection(chunk, sy); // escava: ebs.func_150818_a(x, y & 15, z, Blocks.air)
+        }
+    }
+    @Override public void decorate(IDeepRegion region) {
+        // origens no chunk (region.centerChunkX(), region.centerChunkZ()); region.setBlock(...) no 3×3, só minY..-1
+    }
+    @Override public void onDecorated(WorldServer world, Chunk chunk) {
+        // luz de blocos luminosos colocados sem luz, ticks de fluido etc.
+    }
+});
+```
+
+Garantias:
+* Cada passo roda **uma vez por chunk, para sempre** (o estado é salvo no NBT). Chunks cujo subsolo foi gerado antes de
+  o gerador existir nunca são entregues a ele: um gerador instalado depois não escava onde jogadores já construíram.
+* Gerador adicionado a um mundo que já tem subsolo: os chunks na fronteira do que já existia (TERRAIN sem
+  DECORATED) chegam ao `decorate` sem ter passado pelo `generateTerrain` dele; decore o que encontrar.
+* `retrogen` = o chunk foi salvo antes de ter camada profunda (mundo antigo recebendo o subsolo agora); acima de 0 ele
+  pode ter construções.
+* A lista é congelada no `FMLServerAboutToStartEvent` (ou na primeira geração) e registrada no log; registro tardio
+  ou id repetido lançam exceção.
+* Uma exceção de um gerador é registrada no log (pilha completa nas 3 primeiras, depois só contagem) e o chunk segue.
+* Com `ores = false`, a etapa 3 ainda roda se houver gerador registrado (antes, o chunk nunca chegava a DECORATED).
+* Um chunk pode carregar (e chegar às etapas 2–4) dentro da população de outro chunk, onde o `World` recusa escrita
+  abaixo de 0 aos geradores 1.7.10 (fase de população legada, acima). Os geradores registrados rodam fora dessa
+  fase: `World.setBlock` abaixo de 0 funciona para eles em qualquer etapa.
+
+Contrato:
+* Tudo na thread do servidor. `generateTerrain`: só o próprio chunk, só `minY..-1`, só blocos (sem TileEntity, sem
+  luz, sem vizinhos), função de seed e posição (as bordas dos chunks batem em qualquer ordem de geração).
+* `decorate`: origens no chunk central; escrita no 3×3 por `IDeepRegion.setBlock`, que só aceita `minY..-1`, remove a
+  TileEntity antiga e cria a nova na hora (baú, spawner), sem luz nem atualização de vizinhos.
+* `onDecorated`: o mundo inteiro está disponível; é o lugar para acender blocos luminosos colocados sem luz (lava,
+  líquen), por exemplo com `World.func_147451_t`, que exige os chunks a 17 blocos carregados.
+
+Self-test (`GeneratorProbe`, fase `full`): um gerador de teste escava uma câmara 8×8×8 em 5×5 chunks novos e coloca
+marcadores pela região. Confere: terreno uma vez por chunk novo (49/49); decoração uma vez, depois do terreno dos 9
+chunks e depois dos minérios; câmara intacta após os minérios; 75/75 escritas aceitas (incluindo baú com TileEntity
+e escrita no vizinho) e 75/75 recusadas (Y 0, abaixo do piso, fora do 3×3); chunks fora da área sem alteração;
+`onDecorated` só com o estado gravado; `retrogen` igual a "chunk salvo antes do subsolo" (625 chamadas com retrogen
+nos chunks legados do teste, 0 divergências); com minérios desligados, o chunk ainda chega a DECORATED, sem minérios;
+um chunk carregado dentro de uma população legada (simulada) deixa o `onDecorated` escrever pelo `World` abaixo de 0.
+Controles negativos (cada defeito reintroduzido, o teste reprova): sem a chamada de `generateTerrain` (49/49 chunks
+sem terreno, câmaras cheias); com o bug antigo de `ores = false` (chunk parado em TERRAIN); gerador antes dos minérios
+(15 de 25 chunks decorados sem minério ainda); sem suspender a fase legada (escrita recusada).
+
 ## 6. Minérios — porte fiel da 1.18/1.20
 
 `OreFeature.place/doPlace` portado linha a linha (segmento elipsoidal com `size` esferas, eliminação de esferas
@@ -387,4 +452,4 @@ inteira abaixo de 0. Não afeta a proteção dos claims.
   determinada (o log foi sobrescrito antes de ser analisado; no ambiente de teste o LuckPerms e o voice chat tentam
   conexões externas que expiram). `tools/crucibletest.sh` agora grava um dump das threads
   (`crucibletest-<fase>-stall.txt`) se o relatório não sair 10 min depois do "Done".
-* Cavernas profundas: projeto separado.
+* Cavernas profundas: fora deste mod, por geradores registrados na API (§5.1; o VitaGenesis é o primeiro).

@@ -71,6 +71,7 @@ public final class SelfTest {
                 this.ores(minY);
                 this.physics(minY);
                 this.portal(minY);
+                com.akashiic.bellow.selftest.GeneratorProbe.run((WorldServer) this.world, minY, this::check);
                 if (com.akashiic.bellow.core.Compat.crucible) {
                     com.akashiic.bellow.selftest.BukkitProbe.run((WorldServer) this.world, this::check);
                     com.akashiic.bellow.selftest.PluginProbe.run((WorldServer) this.world, this::check);

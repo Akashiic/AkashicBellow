@@ -4,7 +4,7 @@ Camadas negativas do mundo (Y < 0) para **Minecraft 1.7.10** (Forge 10.13.4.1614
 deepslate, piso de bedrock em gradiente, minérios de deepslate com as distribuições da 1.18/1.20
 e retrogen para mundos que já existem.
 
-Status: **beta** (`0.1.0-beta.1`). Veja os riscos abertos em [docs/DESIGN.md §11](docs/DESIGN.md#11-riscos-abertos-beta).
+Status: **beta** (`0.1.0-beta.2`). Veja os riscos abertos em [docs/DESIGN.md §11](docs/DESIGN.md#11-riscos-abertos-beta).
 
 ## O que faz
 
@@ -79,7 +79,7 @@ Desinstalar: o mundo continua abrindo, mas tudo abaixo de Y 0 é perdido.
 
 Cada push no `main` roda o workflow **Build**, que gera do mesmo commit o mod e o agent do WorldEdit (companion) e
 publica os dois como artifacts do mesmo run, sem zip: `AkashicBellow-<versão>.jar` e
-`AkashicBellow-WorldEdit-6.1.9-<versão>-agent.jar`, com `<versão>` = `0.1.0-beta.1-<commit>`. O resumo do run lista o
+`AkashicBellow-WorldEdit-6.1.9-<versão>-agent.jar`, com `<versão>` = `0.1.0-beta.2-<commit>`. O resumo do run lista o
 SHA-256 de cada jar.
 
 ## Compilar e testar
@@ -108,5 +108,17 @@ os screenshots em `run/client/screenshots/`.
 
 ## API
 
-`com.akashiic.bellow.api.BellowAPI`: `getMinY(world)`, `hasDeepLayers(world)`, `getDeepSection(chunk, sectionY)`,
-para mods que iteram seções diretamente e querem enxergar o subsolo.
+`com.akashiic.bellow.api.BellowAPI` (`API_VERSION = 2`):
+
+* Leitura: `getMinY(world)`, `hasDeepLayers(world)`, `getDeepSection(chunk, sectionY)`, para mods que iteram seções
+  diretamente e querem enxergar o subsolo.
+* **Geradores profundos** (cavernas, aquíferos, estruturas): `registerGenerator(id, IDeepGenerator)` até o postInit.
+  O gerador recebe cada chunk novo logo depois do preenchimento e antes dos minérios (`generateTerrain`), a região
+  3×3 depois dos minérios (`decorate(IDeepRegion)`) e o chunk já marcado como decorado (`onDecorated`). Chunks cujo
+  subsolo foi gerado antes de o gerador ser instalado nunca são entregues a ele. Contrato completo no javadoc de
+  `IDeepGenerator` e em [docs/DESIGN.md §5.1](docs/DESIGN.md#51-geradores-profundos-api).
+* `resendDeepSections(world, chunk, slotMask)`: reenvia seções escritas diretamente aos jogadores que já receberam o
+  chunk.
+
+Para depender da API, declare `required-after:akashicbellow` e confira `BellowAPI.API_VERSION >= 2` em tempo de
+execução (a versão do mod carrega o sufixo do commit nos builds de CI).

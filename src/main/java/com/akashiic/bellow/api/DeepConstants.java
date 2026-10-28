@@ -22,6 +22,12 @@ public final class DeepConstants {
         return slot >= 0 && sectionY < 0 ? slot : -1;
     }
 
+    /** Bit of a section in a slot mask ({@link BellowAPI#resendDeepSections}), 0 when it is out of storage range. */
+    public static int slotBit(int sectionY) {
+        int slot = slot(sectionY);
+        return slot < 0 ? 0 : 1 << slot;
+    }
+
     /** Rounds a configured floor down to a multiple of 16 and clamps it to the supported range. */
     public static int sanitizeMinY(int minY) {
         if (minY >= 0) return 0;

@@ -24,4 +24,19 @@ public final class LegacyGeneration {
     public static boolean active() {
         return DEPTH.get()[0] > 0;
     }
+
+    /**
+     * Leaves the phase for code that owns the deep layer (deep generators called from a chunk load that happens inside
+     * another chunk's population); returns what {@link #resume} needs.
+     */
+    public static int suspend() {
+        int[] depth = DEPTH.get();
+        int previous = depth[0];
+        depth[0] = 0;
+        return previous;
+    }
+
+    public static void resume(int previous) {
+        DEPTH.get()[0] = previous;
+    }
 }

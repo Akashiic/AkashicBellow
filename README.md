@@ -1,4 +1,4 @@
-# Bellow Core
+# Below Core
 
 Camadas negativas do mundo (Y < 0) para **Minecraft 1.7.10** (Forge 10.13.4.1614), no estilo 1.18+:
 deepslate, piso de bedrock em gradiente, minérios de deepslate com as distribuições da 1.18/1.20

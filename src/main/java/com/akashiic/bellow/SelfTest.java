@@ -271,6 +271,15 @@ public final class SelfTest {
             !item.isDead && item.onGround && Math.abs(item.posY - (floor + 1)) < 0.3,
             String.format("posY=%.2f (floor block top %d) onGround=%s", item.posY, floor + 1, item.onGround));
 
+        // Items are also pushed out of solid blocks (func_145771_j), which hides missing collision boxes: a mob is not.
+        net.minecraft.entity.passive.EntityPig pig = new net.minecraft.entity.passive.EntityPig(this.world);
+        pig.setLocationAndAngles(x - 0.5, floor + 3.0, z - 0.5, 0.0F, 0.0F);
+        for (int i = 0; i < 60; i++) pig.onUpdate();
+        this.check(
+            "mob stands on a deep floor",
+            !pig.isDead && Math.abs(pig.posY - (floor + 1)) < 0.3,
+            String.format("posY=%.2f (floor block top %d) onGround=%s", pig.posY, floor + 1, pig.onGround));
+
         this.world.setBlock(x + 1, floor + 8, z, Blocks.sand, 0, 2);
         net.minecraft.entity.item.EntityFallingBlock sand = new net.minecraft.entity.item.EntityFallingBlock(
             this.world,

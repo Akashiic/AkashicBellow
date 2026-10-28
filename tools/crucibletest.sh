@@ -45,5 +45,7 @@ echo "crucible $phase rc=$rc"
 grep -ahE "^(FAIL|FINDING|RESULT|SKIP)" akashicbellow-*.txt 2>/dev/null
 ls crash-reports 2>/dev/null
 [ "$rc" -ne 0 ] && exit "$rc"
-grep -aq "^RESULT FAIL" akashicbellow-*.txt 2>/dev/null && exit 1
+# a server that dies at boot (e.g. a mixin that found no target) writes no report
+ls akashicbellow-*.txt > /dev/null 2>&1 || { echo "no report (see crucibletest-$phase.log)"; exit 1; }
+grep -aq "^RESULT FAIL" akashicbellow-*.txt && exit 1
 exit 0

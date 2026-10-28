@@ -191,9 +191,9 @@ crescendo para o fundo, ferro concentrado perto de 0, cobre só no topo da faixa
 | Crucible: CraftBukkit | `CraftWorld.getBlockAt`, `CraftChunk.getBlock` e `CraftBlock` fazem `y & 0xFF`: Y −10 virava 246 para todo plugin e todo evento Bukkit | abaixo de 0 a máscara vira −1 (`y & −1 == y`); 0..255 inalterado |
 | IC2 2.2.828 | Minerador para em Y 0 (5 comparações com 0); Magnetizador para em Y > 0 | mixins tardios: limites trocados pelo piso do mundo |
 | Galacticraft 4.0 | foguetes (`EntitySpaceshipBase`) são destruídos no servidor se `posY < 0` | mixin tardio: só abaixo do piso |
-| Crucible: colisão | o Spigot reescreve `getCollidingBoundingBoxes` e começa o Y em `max(k - 1, 0)`: nada colidia abaixo de 0 no servidor (itens, mobs e carrinhos caíam pelo deepslate) | mixin só no Crucible: teste e limite usam o piso |
-| Crucible: blocos que caem | o CraftBukkit exige `j > 0` para o pouso: areia e cascalho viravam item abaixo de 0 | mixin só no Crucible: `j > piso` |
-| Forge: TEs ao enviar chunks | `func_147486_a(x, 0, z, …, 256, …)` coleta os pacotes de descrição só de Y ≥ 0 (placas, spawners, máquinas profundas ficavam no estado padrão no cliente) | limite inferior = piso; o Crucible já percorre o mapa de TEs do chunk inteiro |
+| Crucible: colisão | o Spigot reescreve `getCollidingBoundingBoxes` e começa o Y em `max(k - 1, 0)`: nada colidia abaixo de 0 no servidor. Medido sem a correção: um porco cai da plataforma em Y −39 até Y −134 (itens disfarçam, porque são empurrados para fora de blocos) | mixin só no Crucible: teste e limite usam o piso |
+| Crucible: blocos que caem | o CraftBukkit exige `j > 0` para o pouso: areia e cascalho viravam item abaixo de 0 (lido no bytecode do jar de produção) | mixin só no Crucible: `j > piso` |
+| Forge: TEs ao enviar chunks | `func_147486_a(x, 0, z, …, 256, …)` coleta os pacotes de descrição só de Y ≥ 0 (placas, spawners, máquinas profundas ficavam no estado padrão no cliente); o envio rápido do Hodgepodge faz a mesma chamada | no próprio `func_147486_a`: pedido da coluna inteira (0 até o topo) começa no piso; o Crucible já percorre o mapa de TEs do chunk |
 | Vanilla: portais | o `BlockPortal$Size` só desce `while (y > 0)` e o `Teleporter` procura e cria portais de cima até Y 0 | piso nos dois (variante do `Teleporter` para o Crucible, que move as buscas para `findPortal`/`createPortal`) |
 | Vanilla/Forge: outros | Enderman só teleporta com `j > 0`; fluidos finitos do Forge somem em `y < 0`; entidades abaixo de 0 saíam e voltavam para o chunk a cada tick (`EnteringChunk` a cada tick) | piso nos testes; linha de entidade limitada a 0 como no `Chunk.addEntity` |
 | Cliente vanilla (sem Angelica) | o `RenderGlobal` reserva listas/queries para 16 seções de altura; a grade mais alta estourava em distâncias de renderização altas | reserva para 16 + 32 seções |
@@ -258,7 +258,8 @@ inteira abaixo de 0. Não afeta a proteção dos claims.
   constantes, gradiente da bedrock, alcance vertical dos veios — 21 testes.
 * **Servidor, 3 fases em JVMs separadas** (`tools/selftest.sh [-Pbellow.compatRun=true]`): cria o mundo com a
   geração desligada (chunks "legados"), religa e verifica retrogen, terreno, blocos/meta/TileEntity, luz, minérios,
-  física no servidor (item pousa numa plataforma profunda, areia cai e vira bloco) e portal do Nether profundo (acende,
+  física no servidor (um porco fica de pé numa plataforma profunda, um item pousa, areia cai e vira bloco) e portal do
+  Nether profundo (acende,
   sobrevive a uma atualização, o `Teleporter` encontra); depois uma JVM nova relê do disco, inclusive o NBT cru do
   chunk (TE profundo fora de `Level.TileEntities`). Roda sem mods e com EFR + EndlessIDs + ArchaicFix + Hodgepodge, e
   no Crucible de produção.

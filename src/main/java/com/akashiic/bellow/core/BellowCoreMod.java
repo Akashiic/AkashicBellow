@@ -45,8 +45,7 @@ public class BellowCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
         }
         // network
         mixins.add("common.MixinPlayerInstance_Deep");
-        // Crucible sends every tile entity of the chunk map itself (CraftBukkit), so only Forge needs the wider range.
-        if (!Compat.crucible) mixins.add("common.MixinEntityPlayerMP_DeepTiles");
+        mixins.add("common.MixinWorldServer_DeepTiles");
         mixins.add("common.PlayerManagerAccessor");
         mixins
             .add(Compat.crucible ? "common.MixinPlayerManagerQueue_Crucible" : "common.MixinPlayerManagerQueue_Forge");

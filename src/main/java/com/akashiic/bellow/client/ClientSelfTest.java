@@ -42,6 +42,10 @@ public final class ClientSelfTest {
     private int failures;
     private volatile boolean serverReady;
     private int x0, y0, z0;
+    /** A sign written below 0 in a chunk the client has not received yet (description packet on first send). */
+    private int sx, sy, sz;
+    private volatile boolean signRequested;
+    private volatile boolean signReady;
 
     public static void register() {
         ClientSelfTest test = new ClientSelfTest();
@@ -106,6 +110,39 @@ public final class ClientSelfTest {
                 case 5: // control shot: a chest on the surface, to tell deep-specific issues from renderer ones
                     if (this.surfaceReady && ++this.timer > 300) {
                         this.shot(mc, "bellow-surface-control");
+                        this.signRequested = true;
+                        this.state = 6;
+                        this.timer = 0;
+                    }
+                    break;
+                case 6: // walk into the chunk with the deep sign: its text arrives with the chunk
+                    if (this.signReady && ++this.timer > 200) {
+                        Object sign = mc.theWorld.getChunkFromBlockCoords(this.sx, this.sz).chunkTileEntityMap
+                            .get(new net.minecraft.world.ChunkPosition(this.sx & 15, this.sy, this.sz & 15));
+                        String text = sign instanceof net.minecraft.tileentity.TileEntitySign
+                            ? ((net.minecraft.tileentity.TileEntitySign) sign).signText[0]
+                            : null;
+                        net.minecraft.tileentity.TileEntity serverSign = MinecraftServer.getServer()
+                            .worldServerForDimension(0)
+                            .getTileEntity(this.sx, this.sy, this.sz);
+                        this.check(
+                            "deep tile entity state sent with the chunk",
+                            "bellow".equals(text),
+                            "sign text on client: " + text
+                                + ", client block "
+                                + Block.blockRegistry.getNameForObject(mc.theWorld.getBlock(this.sx, this.sy, this.sz))
+                                + ", client chunk loaded "
+                                + mc.theWorld.getChunkFromBlockCoords(this.sx, this.sz).isChunkLoaded
+                                + ", player at "
+                                + (int) mc.thePlayer.posX
+                                + ","
+                                + (int) mc.thePlayer.posY
+                                + ","
+                                + (int) mc.thePlayer.posZ
+                                + ", server "
+                                + (serverSign instanceof net.minecraft.tileentity.TileEntitySign
+                                    ? ((net.minecraft.tileentity.TileEntitySign) serverSign).signText[0]
+                                    : String.valueOf(serverSign)));
                         this.finish(mc);
                     }
                     break;
@@ -135,6 +172,13 @@ public final class ClientSelfTest {
             this.surfaceReady = true;
             return;
         }
+        if (event.phase == TickEvent.Phase.END && this.signRequested && !this.signReady) {
+            EntityPlayerMP p = (EntityPlayerMP) MinecraftServer.getServer()
+                .worldServerForDimension(0).playerEntities.get(0);
+            p.playerNetServerHandler.setPlayerLocation(this.sx + 0.5, this.sy, this.sz - 1.5, 0.0F, 0.0F);
+            this.signReady = true;
+            return;
+        }
         if (event.phase != TickEvent.Phase.END || this.state != 2 || this.serverReady) return;
         MinecraftServer server = MinecraftServer.getServer();
         WorldServer world = server.worldServerForDimension(0);
@@ -153,6 +197,22 @@ public final class ClientSelfTest {
             world.setBlock(this.x0 + 7 * sx, this.y0 + dy, this.z0 + 7 * sz, Blocks.glowstone);
         }
         world.setBlock(this.x0, this.y0 + 6, this.z0, Blocks.glowstone);
+        // far away (not sent to the client yet): a deep sign with text, in a small lit pocket
+        this.sx = this.x0 + 320;
+        this.sz = this.z0;
+        this.sy = minY + 20;
+        // load explicitly: provideChunk hands out the empty chunk for unloaded coordinates here
+        for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++)
+            world.theChunkProviderServer.loadChunk((this.sx >> 4) + dx, (this.sz >> 4) + dz);
+        for (int dx = -1; dx <= 1; dx++) for (int dy = 0; dy < 4; dy++)
+            for (int dz = -2; dz <= 1; dz++) world.setBlockToAir(this.sx + dx, this.sy + dy, this.sz + dz);
+        world.setBlock(this.sx, this.sy + 3, this.sz - 1, Blocks.glowstone);
+        world.setBlock(this.sx, this.sy, this.sz, Blocks.standing_sign, 8, 3);
+        net.minecraft.tileentity.TileEntity sign = world.getTileEntity(this.sx, this.sy, this.sz);
+        if (sign instanceof net.minecraft.tileentity.TileEntitySign) {
+            ((net.minecraft.tileentity.TileEntitySign) sign).signText[0] = "bellow";
+            sign.markDirty();
+        }
         world.setBlock(this.x0 + 2, this.y0, this.z0 + 3, Blocks.chest);
         world.setBlock(this.x0 - 2, this.y0, this.z0 + 3, Blocks.wool, 14, 3);
 

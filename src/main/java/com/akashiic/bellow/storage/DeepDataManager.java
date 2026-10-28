@@ -1,6 +1,9 @@
 package com.akashiic.bellow.storage;
 
 import java.nio.ByteBuffer;
+import java.util.Collections;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 import net.minecraft.block.Block;
 import net.minecraft.init.Blocks;
@@ -35,7 +38,7 @@ import com.falsepattern.chunk.internal.DataRegistryImpl;
  * ChunkAPI readers index an array with {@code Y} and would throw on negative values.
  * <p>
  * Packet: {@code short minY, int slotMask, then per set bit: int length, ChunkAPI cubic blob}. Empty for chunks without
- * deep data and for the "unload" form of S21 ({@code forceUpdate && mask == 0}).
+ * deep data and for the "unload" form of S21 ({@code forceUpdate && mask == 0} on a column with vanilla blocks).
  */
 public final class DeepDataManager implements DataManager.ChunkDataManager, DataManager.PacketDataManager {
 
@@ -45,6 +48,9 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
 
     /** Upper bound for one section blob when the registry reports less (EndlessIDs worst case is ~25 KB). */
     private static final int SECTION_BOUND = 32 * 1024;
+
+    // The budget is read by ChunkAPI when the manager is registered and used by the client to size its reads, so it
+    // must not depend on the configured floor (client and server configs may differ): it covers all 32 slots.
 
     private final int maxPacketSize;
     private final ThreadLocal<byte[]> scratch;
@@ -90,8 +96,23 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
 
     // ------------------------------------------------------------------ NBT
 
+    /**
+     * Deep data written by a newer format version, kept verbatim and written back unchanged (a downgrade must not
+     * rewrite data it cannot read). Such chunks show no deep layer in this session and are not retro-generated.
+     */
+    private static final Map<Chunk, NBTTagCompound> NEWER = Collections.synchronizedMap(new WeakHashMap<>());
+    private static boolean warnedNewer;
+
     @Override
     public void writeChunkToNBT(Chunk chunk, NBTTagCompound nbt) {
+        NBTTagCompound newer = NEWER.get(chunk);
+        if (newer != null) {
+            for (Object key : newer.func_150296_c()) nbt.setTag(
+                (String) key,
+                newer.getTag((String) key)
+                    .copy());
+            return;
+        }
         IDeepChunk deep = (IDeepChunk) chunk;
         nbt.setByte("V", NBT_VERSION);
         nbt.setByte("Gen", deep.bellow$getGenState());
@@ -114,6 +135,21 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
         // May run on the chunk IO thread: touch nothing but this chunk.
         IDeepChunk deep = (IDeepChunk) chunk;
         deep.bellow$setFromDisk(true);
+        if (nbt.hasKey("V") && nbt.getByte("V") > NBT_VERSION) {
+            NEWER.put(chunk, (NBTTagCompound) nbt.copy());
+            deep.bellow$setGenState(DeepConstants.GEN_DECORATED);
+            if (!warnedNewer) {
+                warnedNewer = true;
+                AkashicBellow.LOG.error(
+                    "Chunk [{}, {}] has deep data in format {} (this version reads {}): it is kept unchanged on disk but"
+                        + " not loaded; install the Akashic Bellow version that wrote it",
+                    chunk.xPosition,
+                    chunk.zPosition,
+                    nbt.getByte("V"),
+                    NBT_VERSION);
+            }
+            return;
+        }
         deep.bellow$setGenState(nbt.getByte("Gen"));
         if (!nbt.hasKey("Sections", 9)) return;
         NBTTagList list = nbt.getTagList("Sections", 10);
@@ -173,7 +209,9 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
 
     @Override
     public void writeToBuffer(Chunk chunk, int subChunkMask, boolean forceUpdate, ByteBuffer buffer) {
-        if (forceUpdate && subChunkMask == 0) return; // S21 "unload chunk" form
+        // S21 "unload chunk" form (forceUpdate, mask 0). S26 also sends mask 0 for a column whose vanilla sections are
+        // all empty (a mined-out column above a deep base): that one must still carry the deep layer.
+        if (forceUpdate && subChunkMask == 0 && hasVanillaBlocks(chunk)) return;
         int minY = BellowAPI.getMinY(chunk.worldObj);
         if (minY >= 0) return;
         ExtendedBlockStorage[] sections = ((IDeepChunk) chunk).bellow$peekDeepSections();
@@ -186,30 +224,36 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
             if (sections[slot] != null && (wanted & 1 << slot) != 0) mask |= 1 << slot;
         }
         if (mask == 0) return;
+        // The budget (32 * (4 + scratch)) always holds the sections, unless a sub-chunk manager registered after this
+        // one made a section blob larger than the scratch buffer: then send no deep data rather than throw.
+        if (DataRegistryImpl.maxPacketSizeCubic() > this.scratch.get().length) {
+            if (!this.warnedOverflow) {
+                this.warnedOverflow = true;
+                AkashicBellow.LOG.error(
+                    "A sub-chunk data manager needs {} bytes per section, more than the {} reserved when Akashic Bellow"
+                        + " registered; deep chunk data is not sent to clients",
+                    DataRegistryImpl.maxPacketSizeCubic(),
+                    this.scratch.get().length);
+            }
+            return;
+        }
 
         buffer.putShort((short) minY);
-        int maskPos = buffer.position();
         buffer.putInt(mask);
         byte[] tmp = this.scratch.get();
-        int written = 0;
         for (int slot = firstSlot; slot < sections.length; slot++) {
             if ((mask & 1 << slot) == 0) continue;
             int len = DataRegistryImpl.writeToBufferCubic(chunk, sections[slot], tmp);
-            if (buffer.remaining() < 4 + len) {
-                if (!this.warnedOverflow) {
-                    this.warnedOverflow = true;
-                    AkashicBellow.LOG.error(
-                        "Deep chunk data of [{}, {}] exceeds the packet budget; sending a truncated set of sections",
-                        chunk.xPosition,
-                        chunk.zPosition);
-                }
-                break;
-            }
             buffer.putInt(len);
             buffer.put(tmp, 0, len);
-            written |= 1 << slot;
         }
-        buffer.putInt(maskPos, written);
+    }
+
+    private static boolean hasVanillaBlocks(Chunk chunk) {
+        for (ExtendedBlockStorage ebs : chunk.getBlockStorageArray()) {
+            if (ebs != null && !ebs.isEmpty()) return true;
+        }
+        return false;
     }
 
     @Override
@@ -265,9 +309,11 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
                 int meta = ebs.getExtBlockMetadata(x, y, z);
                 if (block == Blocks.air || !block.hasTileEntity(meta)) continue;
                 TileEntity existing = (TileEntity) chunk.chunkTileEntityMap.get(new ChunkPosition(x, baseY + y, z));
-                if (existing != null && !existing.isInvalid()) continue;
                 TileEntity te = block.createTileEntity(chunk.worldObj, meta);
                 if (te == null) continue;
+                // keep a live tile entity of the same kind (a partial update of a block that stayed a chest); replace
+                // one left over from a different block (chest -> furnace in a bulk change)
+                if (existing != null && !existing.isInvalid() && existing.getClass() == te.getClass()) continue;
                 te.xCoord = (chunk.xPosition << 4) + x;
                 te.yCoord = baseY + y;
                 te.zCoord = (chunk.zPosition << 4) + z;

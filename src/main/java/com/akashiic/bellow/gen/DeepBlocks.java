@@ -46,7 +46,18 @@ public final class DeepBlocks {
                 b = Blocks.stone;
             }
             fill = b;
-            fillMeta = parts.length >= 3 ? Integer.parseInt(parts[2]) : 0;
+            fillMeta = 0;
+            if (parts.length >= 3) {
+                try {
+                    fillMeta = Integer.parseInt(parts[2].trim());
+                } catch (NumberFormatException e) {
+                    AkashicBellow.LOG.error("worldgen.deepBlock '{}': metadata is not a number; using 0", spec);
+                }
+            }
+            if (fillMeta < 0) { // EndlessIDs allows metadata above 15, so only negative values are rejected
+                AkashicBellow.LOG.error("worldgen.deepBlock '{}': negative metadata; using 0", spec);
+                fillMeta = 0;
+            }
         }
         tuff = GameRegistry.findBlock("etfuturum", "tuff");
         copperOre = GameRegistry.findBlock("etfuturum", "copper_ore");
@@ -74,8 +85,9 @@ public final class DeepBlocks {
         return block == fill && meta == fillMeta && block != Blocks.stone || block == tuff && tuff != null;
     }
 
+    /** Stone, including a configured stone fill with another metadata (which is not a deep host). */
     public static boolean isStoneHost(Block block, int meta) {
-        return block == Blocks.stone && meta == 0;
+        return block == Blocks.stone && (meta == 0 || block == fill && meta == fillMeta);
     }
 
     /** Deepslate variant of an ore from Et Futurum's {@code DeepslateOreRegistry}, or the ore itself. */

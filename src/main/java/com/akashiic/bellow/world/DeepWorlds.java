@@ -4,6 +4,9 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -22,8 +25,8 @@ import com.akashiic.bellow.api.DeepConstants;
  * <p>
  * Server worlds: the first time an enabled dimension of a save is opened, the configured floor is written to
  * {@code <save>/akashicbellow.dat}. From then on the stored value wins over the config, so a world can never end up
- * with chunks generated for two different floors. Disabling a dimension in the config hides its deep layer without
- * deleting it (chunk data stays dormant in NBT).
+ * with chunks generated for two different floors. A locked dimension keeps its floor even if it is later removed from
+ * the config: running it with floor 0 would drop its deep tile entities and entities on the next save.
  * <p>
  * Client worlds start at 0 and are updated by the server ({@code DimensionInfoMessage}).
  */
@@ -42,13 +45,13 @@ public final class DeepWorlds {
             return announced == null ? 0 : announced;
         }
         int dim = world.provider.dimensionId;
-        if (!BellowConfig.isDimensionEnabled(dim)) return 0;
+        boolean enabled = BellowConfig.isDimensionEnabled(dim);
         int configured = DeepConstants.sanitizeMinY(BellowConfig.minY);
-        if (configured >= 0) return 0;
 
         ISaveHandler handler = world.getSaveHandler();
         File dir = handler == null ? null : handler.getWorldDirectory();
         if (dir == null) {
+            if (!enabled || configured >= 0) return 0;
             AkashicBellow.LOG
                 .warn("Dimension {} has no save directory; using configured floor {} without locking", dim, configured);
             return configured;
@@ -59,7 +62,14 @@ public final class DeepWorlds {
         String key = Integer.toString(dim);
         if (floors.hasKey(key)) {
             int locked = DeepConstants.sanitizeMinY(floors.getInteger(key));
-            if (locked != configured) {
+            if (!enabled) {
+                AkashicBellow.LOG.warn(
+                    "Dimension {} of '{}' is not in the config, but its deep layer is locked to minY {}; keeping it"
+                        + " (a floor of 0 would discard its deep tile entities and entities when chunks are saved)",
+                    dim,
+                    dir.getName(),
+                    locked);
+            } else if (locked != configured) {
                 AkashicBellow.LOG.warn(
                     "Dimension {} of '{}' is locked to minY {}; ignoring configured {} (delete {} only together with the deep chunk data)",
                     dim,
@@ -70,6 +80,7 @@ public final class DeepWorlds {
             }
             return locked;
         }
+        if (!enabled || configured >= 0) return 0;
 
         floors.setInteger(key, configured);
         lock.setTag("Floors", floors);
@@ -103,8 +114,16 @@ public final class DeepWorlds {
             try (FileOutputStream out = new FileOutputStream(tmp)) {
                 CompressedStreamTools.writeCompressed(lock, out);
             }
-            if (file.exists() && !file.delete()) throw new IOException("cannot replace " + file);
-            if (!tmp.renameTo(file)) throw new IOException("cannot rename " + tmp);
+            // atomic where the file system allows it: a crash must never leave the save without its locks
+            try {
+                Files.move(
+                    tmp.toPath(),
+                    file.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException e) {
             throw new IllegalStateException("Cannot write " + file, e);
         }

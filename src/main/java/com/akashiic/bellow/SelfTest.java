@@ -23,9 +23,10 @@ import com.akashiic.bellow.gen.DeepBlocks;
 import com.akashiic.bellow.gen.DeepTerrain;
 
 /**
- * In-game verification of the deep layer on a live server world. Every check prints PASS/FAIL with the measured values.
- * Used by {@code /bellow selftest} and, headless, by {@code -Dakashicbellow.selftest=true}.
- * It writes blocks only inside two test chunks far from spawn.
+ * In-game verification of the deep layer on a test server world. Every check prints PASS/FAIL with the measured
+ * values. Used headless with {@code -Dakashicbellow.selftest=true}, and by {@code /bellow selftest} only on servers
+ * started with that flag: it generates and writes test chunks far from spawn (around chunks 1000..1100), leaves marker
+ * blocks and a chest there, and on Crucible creates and removes a WorldGuard region and a GriefPreventionPlus claim.
  */
 public final class SelfTest {
 
@@ -68,6 +69,8 @@ public final class SelfTest {
                 this.light(minY);
                 this.writePersistenceMarkers(minY);
                 this.ores(minY);
+                this.physics(minY);
+                this.portal(minY);
                 if (com.akashiic.bellow.core.Compat.crucible) {
                     com.akashiic.bellow.selftest.BukkitProbe.run((WorldServer) this.world, this::check);
                     com.akashiic.bellow.selftest.PluginProbe.run((WorldServer) this.world, this::check);
@@ -191,9 +194,29 @@ public final class SelfTest {
         this.check("persistence markers written", this.world.getBlock(x, minY + 3, z) == Blocks.diamond_block, "");
     }
 
-    private void verifyPersisted(int minY) {
+    private void verifyPersisted(int minY) throws java.io.IOException {
         ChunkProviderServer provider = (ChunkProviderServer) this.world.getChunkProvider();
         this.check("marker chunk not loaded before verify", !provider.chunkExists(MARK_CX, MARK_CZ), "");
+        // On disk, deep tile entities sit outside the vanilla list (a world without the mod must still load).
+        java.io.DataInputStream raw = net.minecraft.world.chunk.storage.RegionFileCache.getChunkInputStream(
+            this.world.getSaveHandler()
+                .getWorldDirectory(),
+            MARK_CX,
+            MARK_CZ);
+        net.minecraft.nbt.NBTTagCompound level = raw == null ? new net.minecraft.nbt.NBTTagCompound()
+            : net.minecraft.nbt.CompressedStreamTools.read(raw)
+                .getCompoundTag("Level");
+        if (raw != null) raw.close();
+        int vanillaDeep = 0;
+        net.minecraft.nbt.NBTTagList vanilla = level.getTagList("TileEntities", 10);
+        for (int i = 0; i < vanilla.tagCount(); i++) if (vanilla.getCompoundTagAt(i)
+            .getInteger("y") < 0) vanillaDeep++;
+        int kept = level.getTagList(com.akashiic.bellow.storage.DeepTiles.KEY, 10)
+            .tagCount();
+        this.check(
+            "deep tile entities stored apart",
+            raw != null && vanillaDeep == 0 && kept == 1,
+            "in TileEntities: " + vanillaDeep + ", in " + com.akashiic.bellow.storage.DeepTiles.KEY + ": " + kept);
         Chunk c = this.load(MARK_CX, MARK_CZ);
         int x = MARK_CX * 16 + 3, z = MARK_CZ * 16 + 5;
         IDeepChunk deep = (IDeepChunk) c;
@@ -219,6 +242,88 @@ public final class SelfTest {
                 && stack.getItem() == net.minecraft.item.Item.getItemFromBlock(Blocks.dirt),
             String.valueOf(te) + " " + stack);
         this.check("bedrock floor persisted", c.getBlock(0, minY, 0) == Blocks.bedrock, "");
+    }
+
+    /**
+     * Server physics below 0, in a sealed cavity: an item lands on a deep stone floor (collision boxes, rewritten by
+     * Spigot on Crucible) and a falling block lands as a block (CraftBukkit adds its own height test).
+     */
+    private void physics(int minY) {
+        int cx = 1060, cz = 1060;
+        for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) this.load(cx + dx, cz + dz);
+        int x = cx * 16 + 8, z = cz * 16 + 8, floor = minY + 24;
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                this.world.setBlock(x + dx, floor, z + dz, Blocks.stone, 0, 2);
+                for (int y = floor + 1; y <= floor + 12; y++) this.world.setBlock(x + dx, y, z + dz, Blocks.air, 0, 2);
+            }
+        }
+        net.minecraft.entity.item.EntityItem item = new net.minecraft.entity.item.EntityItem(
+            this.world,
+            x + 0.5,
+            floor + 4.0,
+            z + 0.5,
+            new net.minecraft.item.ItemStack(Blocks.dirt));
+        item.motionX = item.motionY = item.motionZ = 0;
+        for (int i = 0; i < 60; i++) item.onUpdate();
+        this.check(
+            "entity collides below 0",
+            !item.isDead && item.onGround && Math.abs(item.posY - (floor + 1)) < 0.3,
+            String.format("posY=%.2f (floor block top %d) onGround=%s", item.posY, floor + 1, item.onGround));
+
+        this.world.setBlock(x + 1, floor + 8, z, Blocks.sand, 0, 2);
+        net.minecraft.entity.item.EntityFallingBlock sand = new net.minecraft.entity.item.EntityFallingBlock(
+            this.world,
+            x + 1.5,
+            floor + 8.5,
+            z + 0.5,
+            Blocks.sand,
+            0);
+        for (int i = 0; i < 200 && !sand.isDead; i++) sand.onUpdate();
+        Block landed = this.world.getBlock(x + 1, floor + 1, z);
+        this.check(
+            "falling block lands below 0",
+            landed == Blocks.sand,
+            "at floor+1: " + CommandNames.name(landed) + ", entity dead: " + sand.isDead);
+        this.world.setBlock(x + 1, floor + 1, z, Blocks.air, 0, 2);
+    }
+
+    /** A nether portal built below 0 lights, survives a neighbour update and is found by the teleporter. */
+    private void portal(int minY) {
+        int cx = 1080, cz = 1080;
+        for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) this.load(cx + dx, cz + dz);
+        int x = cx * 16 + 4, z = cz * 16 + 8, y = minY + 30;
+        for (int dx = -1; dx <= 4; dx++) for (int dy = 0; dy <= 5; dy++)
+            for (int dz = -1; dz <= 1; dz++) this.world.setBlock(x + dx, y + dy, z + dz, Blocks.air, 0, 2);
+        for (int dx = 0; dx <= 3; dx++) {
+            this.world.setBlock(x + dx, y, z, Blocks.obsidian, 0, 2);
+            this.world.setBlock(x + dx, y + 4, z, Blocks.obsidian, 0, 2);
+        }
+        for (int dy = 1; dy <= 3; dy++) {
+            this.world.setBlock(x, y + dy, z, Blocks.obsidian, 0, 2);
+            this.world.setBlock(x + 3, y + dy, z, Blocks.obsidian, 0, 2);
+        }
+        boolean lit = Blocks.portal.func_150000_e(this.world, x + 1, y + 1, z);
+        this.check(
+            "portal below 0 lights",
+            lit && this.world.getBlock(x + 1, y + 1, z) == Blocks.portal,
+            "created=" + lit + " at Y " + (y + 1));
+        Blocks.portal.onNeighborBlockChange(this.world, x + 1, y + 2, z, Blocks.obsidian);
+        this.check(
+            "portal below 0 survives an update",
+            this.world.getBlock(x + 1, y + 2, z) == Blocks.portal,
+            CommandNames.name(this.world.getBlock(x + 1, y + 2, z)));
+        net.minecraft.entity.item.EntityItem traveller = new net.minecraft.entity.item.EntityItem(
+            this.world,
+            x + 1.5,
+            40.0,
+            z + 0.5);
+        boolean found = ((WorldServer) this.world).getDefaultTeleporter()
+            .placeInExistingPortal(traveller, traveller.posX, traveller.posY, traveller.posZ, 0.0F);
+        this.check(
+            "teleporter finds a portal below 0",
+            found && traveller.posY < 0,
+            String.format("found=%s posY=%.1f", found, traveller.posY));
     }
 
     /** Spawn chunks of a world first generated with worldgen.enabled=false must have been filled on load. */

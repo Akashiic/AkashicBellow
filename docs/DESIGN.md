@@ -46,11 +46,20 @@ teto vanilla (256) intocado, e **nenhuma mudança no caminho Y ≥ 0**.
   ```
   Cada seção é serializada por `DataRegistryImpl.writeSubChunkToNBT`, ou seja, pelos mesmos managers que gravam as
   seções vanilla (inclusive os do EndlessIDs) — formato idêntico, IDs estendidos preservados.
+* **Tile entities profundas** ficam fora da lista vanilla `Level.TileEntities`: no `ChunkDataEvent.Save` elas vão para
+  `Level.AkashicBellowDeepTiles`, e voltam para a lista no início de `AnvilChunkLoader.loadEntities` (caminho síncrono
+  e assíncrono). Sem isso, um TE com Y < 0 na lista vanilla derruba o carregamento do chunk sem o mod
+  (`storageArrays[-1]`, ou a checagem do Hodgepodge). Chunks gravados por versões anteriores carregam igual e são
+  convertidos no próximo save.
+* **Versão do formato**: `V` é lido; dados profundos de um formato mais novo (downgrade do mod) não são carregados,
+  ficam intactos e são regravados como estavam.
 * **Trava por mundo**: o `minY` efetivo de cada dimensão é gravado em `<mundo>/akashicbellow.dat` (mapa `Floors`,
-  escrita atômica tmp+rename) no primeiro uso. Mudar a config depois não altera mundos existentes. Arquivo corrompido
-  → o servidor recusa subir (melhor que adivinhar um piso e perder dados).
-* **Desinstalação**: vanilla/ChunkAPI ignoram a tag; o mundo carrega, perdendo o conteúdo abaixo de 0. A bedrock
-  legada que foi substituída (ver §5) não volta.
+  escrita atômica) no primeiro uso. Mudar a config depois não altera mundos existentes, e uma dimensão travada que
+  sai da lista `dimensions` continua com o seu piso (com aviso no log): voltar ao piso 0 apagaria TEs e entidades
+  profundas no próximo save. Arquivo corrompido → o servidor recusa subir (melhor que adivinhar um piso e perder
+  dados).
+* **Desinstalação**: vanilla/ChunkAPI ignoram as tags; o mundo carrega, perdendo o conteúdo abaixo de 0 (entidades
+  que estavam lá caem no vazio). A bedrock legada que foi substituída (ver §5) não volta.
 
 ## 4. Rede
 
@@ -134,9 +143,12 @@ Sem EFR: minério comum.
 | ore_copper (EFR) | 16 | 10 | 0 | trapezoid(−16, 112) | Y<0 |
 | ore_emerald (montanhas) | 100 | 3 | 0 | trapezoid(−16, 480) | Y<0 |
 
-Com `minY = −64` os parâmetros são exatamente os da 1.20.1. Para pisos mais fundos, âncoras `aboveBottom` descem
-junto, âncoras absolutas ficam, e features `uniform(bottom, X)` podem ter a contagem escalada por
-`(X − minY + 1)/(X + 64 + 1)` (densidade por volume preservada; arredondamento estocástico preserva a esperança).
+Com `minY = −64` os parâmetros são exatamente os da 1.20.1. Para outros pisos, âncoras `aboveBottom` acompanham o
+piso, âncoras absolutas ficam, e features `uniform(bottom, X)` podem ter a contagem escalada por
+`(X − minY + 1)/(X + 64 + 1)`: mais tentativas abaixo de −64, menos acima, com a densidade por volume preservada e o
+arredondamento estocástico preservando a esperança. A âncora `top` é a `top()` da 1.18 (Y 319). Como na 1.18, toda
+origem sorteada é colocada e só os blocos são cortados (a camada profunda escreve só abaixo de 0); por isso os veios
+com origem em Y 0..+6 alcançam a faixa −1..−5.
 
 Medido no teste de servidor (121 chunks, piso −64): ≈27 diamantes/chunk abaixo de 0, distribuição de redstone
 crescendo para o fundo, ferro concentrado perto de 0, cobre só no topo da faixa — o perfil da 1.18.
@@ -179,6 +191,12 @@ crescendo para o fundo, ferro concentrado perto de 0, cobre só no topo da faixa
 | Crucible: CraftBukkit | `CraftWorld.getBlockAt`, `CraftChunk.getBlock` e `CraftBlock` fazem `y & 0xFF`: Y −10 virava 246 para todo plugin e todo evento Bukkit | abaixo de 0 a máscara vira −1 (`y & −1 == y`); 0..255 inalterado |
 | IC2 2.2.828 | Minerador para em Y 0 (5 comparações com 0); Magnetizador para em Y > 0 | mixins tardios: limites trocados pelo piso do mundo |
 | Galacticraft 4.0 | foguetes (`EntitySpaceshipBase`) são destruídos no servidor se `posY < 0` | mixin tardio: só abaixo do piso |
+| Crucible: colisão | o Spigot reescreve `getCollidingBoundingBoxes` e começa o Y em `max(k - 1, 0)`: nada colidia abaixo de 0 no servidor (itens, mobs e carrinhos caíam pelo deepslate) | mixin só no Crucible: teste e limite usam o piso |
+| Crucible: blocos que caem | o CraftBukkit exige `j > 0` para o pouso: areia e cascalho viravam item abaixo de 0 | mixin só no Crucible: `j > piso` |
+| Vanilla: TEs ao enviar chunks | `func_147486_a(x, 0, z, …, 256, …)` coleta os pacotes de descrição só de Y ≥ 0 (placas, spawners, máquinas profundas ficavam no estado padrão no cliente) | limite inferior = piso |
+| Vanilla: portais | o `BlockPortal$Size` só desce `while (y > 0)` e o `Teleporter` procura e cria portais de cima até Y 0 | piso nos dois (variante do `Teleporter` para o Crucible, que move as buscas para `findPortal`/`createPortal`) |
+| Vanilla/Forge: outros | Enderman só teleporta com `j > 0`; fluidos finitos do Forge somem em `y < 0`; entidades abaixo de 0 saíam e voltavam para o chunk a cada tick (`EnteringChunk` a cada tick) | piso nos testes; linha de entidade limitada a 0 como no `Chunk.addEntity` |
+| Cliente vanilla (sem Angelica) | o `RenderGlobal` reserva listas/queries para 16 seções de altura; a grade mais alta estourava em distâncias de renderização altas | reserva para 16 + 32 seções |
 
 Os limites de IC2/GC foram encontrados por varredura de bytecode (comparações de `yCoord`/`posY` com 0 e acessos
 diretos a `getBlockStorageArray`) e confirmados pela sonda de compatibilidade (§10), que os reprova sem os patches.
@@ -312,4 +330,10 @@ inteira abaixo de 0. Não afeta a proteção dos claims.
   fixa 0..256: as LODs não incluem a camada profunda (invisível da superfície de qualquer forma).
 * A sonda testa comportamento de servidor. O visual de máquinas específicas no cliente (TESR) foi validado só pelo
   baú (mesmo caminho de renderização).
+* Limites vanilla que ficam como estão (o heightmap nunca desce abaixo de 0, §2): `canBlockSeeTheSky` é falso abaixo
+  de 0, então beacons abaixo de 0 não acendem e mortos-vivos não queimam num poço aberto; árvores e cogumelos
+  gigantes só crescem com `y >= 1`, cipós param de descer em Y 1; `/setspawn` e `/setworldspawn` aceitam Y 0..256.
+* Retrogen de minérios de outros mods que roda fora de `Chunk.populateChunk` (por exemplo a do CoFH, por tick) não
+  passa pela guarda de §5 e pode deixar veios antigos abaixo de 0. No Crucible, os ticks aleatórios profundos usam o
+  `growthOdds` do Spigot deixado pelo último chunk processado.
 * Cavernas profundas: projeto separado.

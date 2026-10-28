@@ -32,7 +32,7 @@ public class GenConfig {
     @Config.DefaultBoolean(true)
     public static boolean ores;
 
-    @Config.Comment({ "For floors deeper than -64: scale the count of features whose range starts at the bottom",
+    @Config.Comment({ "For floors other than -64: scale the count of features whose range starts at the bottom",
         "of the world so that ore density per block stays equal to 1.18." })
     @Config.DefaultBoolean(true)
     public static boolean scaleBottomAnchoredCounts;

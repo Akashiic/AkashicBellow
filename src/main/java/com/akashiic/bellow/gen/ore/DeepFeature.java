@@ -100,7 +100,8 @@ public final class DeepFeature {
 
     /**
      * Expected number of placement attempts per chunk before height clipping, including the optional density scaling
-     * for deeper floors: for {@code uniform(bottom, X)} the span is {@code X - minY + 1} instead of {@code X + 65}.
+     * for floors other than -64: for {@code uniform(bottom, X)} the span is {@code X - minY + 1} instead of
+     * {@code X + 65}, so the count follows the span (fewer attempts above -64, more below).
      */
     public double expectedAttempts(int minY, boolean scaleBottomAnchored, double multiplier) {
         double base = this.rarity > 0 ? 1.0 / this.rarity : (this.countMin + this.countMax) / 2.0;
@@ -108,7 +109,7 @@ public final class DeepFeature {
     }
 
     public double densityScale(int minY, boolean scaleBottomAnchored) {
-        if (!scaleBottomAnchored || minY >= -64 || !this.height.isBottomAnchoredUniform()) return 1.0;
+        if (!scaleBottomAnchored || minY == -64 || !this.height.isBottomAnchoredUniform()) return 1.0;
         int top = this.height.maxInclusive(minY);
         return (double) (top - minY + 1) / (double) (top + 64 + 1);
     }

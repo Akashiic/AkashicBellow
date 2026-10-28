@@ -13,7 +13,7 @@ import com.akashiic.bellow.api.BellowAPI;
 
 /**
  * Deep section lookup for the vanilla {@code Chunk.getSavedLightValue}. Not applied when ArchaicFix's Phosphor
- * overwrites that method (see {@code archaic.MixinChunk_DeepLightPhosphor}).
+ * overwrites that method (see {@code common.MixinChunk_DeepLightPhosphor}).
  * <p>
  * A missing deep section reports 0: unlike missing sections above the terrain, there is never sky above it.
  */

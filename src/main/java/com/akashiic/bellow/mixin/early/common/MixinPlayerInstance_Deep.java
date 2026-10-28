@@ -1,5 +1,7 @@
 package com.akashiic.bellow.mixin.early.common;
 
+import java.util.List;
+
 import net.minecraft.network.Packet;
 import net.minecraft.server.management.PlayerManager;
 import net.minecraft.world.ChunkCoordIntPair;
@@ -39,6 +41,13 @@ public abstract class MixinPlayerInstance_Deep implements IDeepPlayerInstance, D
     private int numberOfTilesToUpdate;
 
     @Shadow
+    private int flagsYAreasToUpdate;
+
+    @Shadow
+    @Final
+    private List<?> playersWatchingChunk;
+
+    @Shadow
     public abstract void sendToAllPlayersWatchingChunk(Packet packet);
 
     @Unique
@@ -58,9 +67,21 @@ public abstract class MixinPlayerInstance_Deep implements IDeepPlayerInstance, D
         changes.add(localX, y, localZ);
     }
 
+    /**
+     * Vanilla removes an instance from the update queue when its last watcher leaves only if it has vanilla changes, so
+     * one holding only deep changes (or queued twice, deep first) can still be flushed after the chunk was unloaded:
+     * building the block-change packets would load it again from disk on the main thread. With nobody watching there
+     * is nothing to send, so pending changes of both kinds are dropped.
+     */
     @Inject(method = "sendChunkUpdate()V", at = @At("HEAD"), require = 1)
     private void bellow$sendDeep(CallbackInfo ci) {
         DeepChanges changes = this.bellow$changes;
+        if (this.playersWatchingChunk.isEmpty()) {
+            if (changes != null) changes.clear();
+            this.numberOfTilesToUpdate = 0;
+            this.flagsYAreasToUpdate = 0;
+            return;
+        }
         if (changes == null || changes.isEmpty()) return;
         changes.flush(
             this.this$0.getWorldServer(),

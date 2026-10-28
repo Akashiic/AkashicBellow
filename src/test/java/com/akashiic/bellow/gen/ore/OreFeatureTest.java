@@ -33,9 +33,10 @@ class OreFeatureTest {
             return y != this.airY;
         }
 
+        /** Always a valid target, so a position the vein visits twice is placed twice and counted as duplicate. */
         @Override
         public int matchTarget(int x, int y, int z) {
-            return this.placed.containsKey(key(x, y, z)) ? -1 : 0;
+            return 0;
         }
 
         @Override
@@ -86,7 +87,7 @@ class OreFeatureTest {
 
     @Test
     void meanVeinSizeIsStable() {
-        // Regression anchor for the port: mean blocks per vein in solid stone (no air), 20k veins per size.
+        // Sanity check of the port: mean blocks per vein in solid stone (no air), 20k veins per size.
         Random r = new Random(2024);
         double[] mean = new double[65];
         for (int size : new int[] { 4, 8, 9, 12 }) {

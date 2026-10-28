@@ -60,7 +60,7 @@ Detalhes em `docs/DESIGN.md` §9.1.
 | `worldgen.replaceLegacyBedrock` / `legacyBedrockMaxY` | true / 4 | trocar a bedrock antiga (Y 0..4) pelo bloco profundo |
 | `worldgen.deepBlock` | `auto` | bloco de preenchimento (`auto` = deepslate do EFR ou pedra) |
 | `worldgen.ores` | true | minérios, tufo e cascalho abaixo de 0 |
-| `worldgen.scaleBottomAnchoredCounts` | true | para pisos abaixo de −64, manter a densidade por volume |
+| `worldgen.scaleBottomAnchoredCounts` | true | para pisos diferentes de −64, manter a densidade por volume |
 | `worldgen.oreCountMultiplier` | 1.0 | multiplicador global das contagens |
 
 ## Instalação num servidor existente

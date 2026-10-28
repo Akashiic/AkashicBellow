@@ -68,6 +68,11 @@ public final class DeepPhosphorEngine extends LightingEngine {
         for (int i = 0; i < 6; i++) this.neighbors[i] = new Neighbor();
     }
 
+    /** Floor this engine was built for. */
+    public int minY() {
+        return this.minY;
+    }
+
     private static LongQueue[] newLevelQueues() {
         LongQueue[] q = new LongQueue[16];
         for (int i = 0; i < 16; i++) q[i] = new LongQueue();

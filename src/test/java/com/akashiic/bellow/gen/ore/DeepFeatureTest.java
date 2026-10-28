@@ -24,6 +24,9 @@ class DeepFeatureTest {
         // span -512..15 = 528 vs -64..15 = 80
         assertEquals(528.0 / 80.0, redstone.densityScale(-512, true), 1e-12);
         assertEquals(1.0, redstone.densityScale(-512, false), 1e-12);
+        // and for shallower floors: span -16..15 = 32 vs 80
+        assertEquals(32.0 / 80.0, redstone.densityScale(-16, true), 1e-12);
+        assertEquals(1.0, redstone.densityScale(-64, true), 1e-12);
         Random r = new Random(3);
         long sum = 0;
         int n = 200000;

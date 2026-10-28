@@ -35,7 +35,9 @@ public final class DeepLightingInstaller {
                 chunkEngine = fieldOfType(Chunk.class, ILightingEngine.class);
             }
             Object current = worldEngine.get(world);
-            if (current instanceof DeepPhosphorEngine) return;
+            // the engine fixes its range when built: a client world told a different floor later gets a new one
+            if (current instanceof DeepPhosphorEngine
+                && ((DeepPhosphorEngine) current).minY() == BellowAPI.getMinY(world)) return;
             if (current instanceof ILightingEngine) ((ILightingEngine) current).processLightUpdates();
             worldEngine.set(world, new DeepPhosphorEngine(world));
             for (Chunk chunk : loadedChunks(world.getChunkProvider())) chunkEngine.set(chunk, null);

@@ -12,13 +12,18 @@ import com.akashiic.bellow.api.BellowAPI;
 /**
  * Galacticraft rockets (every {@code EntitySpaceshipBase}: tier 1-3, cargo) are killed server side when
  * {@code posY < 0.0}, which deletes a rocket standing in a deep base. The check is moved to the world floor.
- * {@code func_70071_h_} ({@code onUpdate}) holds exactly one {@code 0.0} constant: that comparison.
+ * {@code func_70071_h_} ({@code onUpdate}) holds two {@code 0.0} constants: the first is that comparison, the second
+ * a motion reset that stays 0.
  */
 @Pseudo
 @Mixin(targets = "micdoodle8.mods.galacticraft.api.prefab.entity.EntitySpaceshipBase", remap = false)
 public abstract class MixinEntitySpaceshipBase_Deep {
 
-    @ModifyConstant(method = "func_70071_h_", constant = @Constant(doubleValue = 0.0D, ordinal = 0), require = 1)
+    @ModifyConstant(
+        method = "func_70071_h_",
+        constant = @Constant(doubleValue = 0.0D, ordinal = 0),
+        require = 1,
+        allow = 1)
     private double bellow$killBelow(double zero) {
         return BellowAPI.getMinY(((Entity) (Object) this).worldObj);
     }

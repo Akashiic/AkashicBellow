@@ -21,12 +21,13 @@ public final class BellowAPI {
     }
 
     /**
-     * Returns the storage of a deep section ({@code sectionY < 0}) or {@code null}. Do not cache the result across
-     * ticks: chunks may reload.
+     * Returns the storage of a deep section ({@code minY >> 4 <= sectionY < 0}) or {@code null}; sections below the
+     * world floor (dormant data the world itself never reads) are not exposed. Do not cache the result across ticks:
+     * chunks may reload.
      */
     public static ExtendedBlockStorage getDeepSection(Chunk chunk, int sectionY) {
         int slot = DeepConstants.slot(sectionY);
-        if (slot < 0) return null;
+        if (slot < 0 || sectionY << 4 < getMinY(chunk.worldObj)) return null;
         ExtendedBlockStorage[] deep = ((IDeepChunk) chunk).bellow$peekDeepSections();
         return deep == null ? null : deep[slot];
     }

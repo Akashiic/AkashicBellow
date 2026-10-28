@@ -34,6 +34,11 @@ public final class OreFeature {
     private OreFeature() {}
 
     /** @return number of blocks placed. */
+    /** Vertical reach of a vein around its origin: blocks lie within {@code [y - reach, y + reach]}. */
+    public static int verticalReach(int size) {
+        return 2 + ceil((size / 16.0F * 2.0F + 1.0F) / 2.0F);
+    }
+
     public static int place(Random random, int originX, int originY, int originZ, int size, float discardChance,
         World world) {
         float angle = random.nextFloat() * (float) Math.PI;

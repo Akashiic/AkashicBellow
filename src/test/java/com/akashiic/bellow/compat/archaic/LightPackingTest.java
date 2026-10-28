@@ -2,6 +2,7 @@ package com.akashiic.bellow.compat.archaic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -32,9 +33,10 @@ class LightPackingTest {
                 assertEquals(p[2] + d[i][2], LightPacking.decodeZ(n));
             }
         }
-        // below the supported floor decodes far out of range (rejected by the engine's range check)
+        // below the supported floor wraps to the top of the encoding, out of the world range (rejected by the
+        // engine's range check) instead of aliasing a real block
         long bottom = LightPacking.encode(0, -512, 0) + LightPacking.NEIGHBOR_SHIFTS[0];
-        assertNotEquals(-513, LightPacking.decodeY(bottom));
+        assertTrue(LightPacking.decodeY(bottom) > 255, "decoded " + LightPacking.decodeY(bottom));
     }
 
     @Test

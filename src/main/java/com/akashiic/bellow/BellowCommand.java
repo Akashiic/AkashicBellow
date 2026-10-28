@@ -20,7 +20,9 @@ import com.akashiic.bellow.api.IDeepChunk;
 /**
  * {@code /bellow info} - floor and deep state of the current chunk.<br>
  * {@code /bellow stats [radius]} - histogram of non-fill blocks below Y 0 in loaded chunks around the sender.<br>
- * {@code /bellow selftest} - runs {@link SelfTest} and prints the report.
+ * {@code /bellow selftest} - runs {@link SelfTest} and prints the report. It writes blocks, chests and (on Crucible)
+ * plugin regions and claims in the world, so it only runs on servers started with
+ * {@code -Dakashicbellow.selftest=true}.
  */
 public class BellowCommand extends CommandBase {
 
@@ -87,6 +89,13 @@ public class BellowCommand extends CommandBase {
                 return;
             }
             case "selftest": {
+                if (!Boolean.getBoolean("akashicbellow.selftest")) {
+                    say(
+                        sender,
+                        "The self test writes test blocks and chests into this world; it only runs on a test server"
+                            + " started with -Dakashicbellow.selftest=true.");
+                    return;
+                }
                 for (String line : new SelfTest(world).run()) say(sender, line);
                 return;
             }

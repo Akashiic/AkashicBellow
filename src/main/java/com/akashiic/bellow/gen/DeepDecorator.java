@@ -127,7 +127,9 @@ public final class DeepDecorator {
                 if (f.mountainsOnly
                     && !isMountain(centre.getBiomeGenForWorldCoords(x & 15, z & 15, world.getWorldChunkManager())))
                     continue;
-                if (y >= 0 || y < minY) continue; // Y >= 0 belongs to the 1.7.10 generators of the pack
+                // Like 1.18, every origin is placed and blocks are clipped (DeepRegion writes only minY..-1, Y >= 0
+                // belongs to the 1.7.10 generators of the pack); only veins that cannot reach that band are skipped.
+                if (!reachesDeepBand(y, f.size, minY)) continue;
                 OreFeature.place(random, x, y, z, f.size, f.discardOnAir, view);
             }
         }
@@ -139,6 +141,12 @@ public final class DeepDecorator {
             c.setChunkModified();
             resendToWatchers(world, c, slots);
         }
+    }
+
+    /** Whether a vein of {@code size} with its origin at {@code y} can put blocks in {@code [minY, -1]}. */
+    static boolean reachesDeepBand(int y, int size, int minY) {
+        int reach = OreFeature.verticalReach(size);
+        return y - reach <= -1 && y + reach >= minY;
     }
 
     private static boolean isMountain(BiomeGenBase biome) {

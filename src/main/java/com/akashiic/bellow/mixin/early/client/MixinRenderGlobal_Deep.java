@@ -6,9 +6,12 @@ import net.minecraft.client.renderer.RenderGlobal;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Constant;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
+import org.spongepowered.asm.mixin.injection.ModifyConstant;
 
 import com.akashiic.bellow.api.BellowAPI;
+import com.akashiic.bellow.api.DeepConstants;
 import com.llamalad7.mixinextras.expression.Definition;
 import com.llamalad7.mixinextras.expression.Expression;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
@@ -26,6 +29,16 @@ public abstract class MixinRenderGlobal_Deep {
 
     private int bellow$floor() {
         return BellowAPI.getMinY(this.theWorld);
+    }
+
+    /**
+     * The constructor reserves display lists and occlusion queries for {@code 34 * 34 * 16} renderers, before any world
+     * (and floor) is known; the taller grid indexes past them (IndexOutOfBounds on the query buffer at high render
+     * distances, overwritten display lists without occlusion). Reserve for the deepest floor: these are only GL names.
+     */
+    @ModifyConstant(method = "<init>", constant = @Constant(intValue = 16), require = 1, allow = 1)
+    private int bellow$reserveDeepRows(int sixteen) {
+        return sixteen + DeepConstants.MAX_DEEP_SECTIONS;
     }
 
     @Definition(id = "renderChunksTall", field = "Lnet/minecraft/client/renderer/RenderGlobal;renderChunksTall:I")

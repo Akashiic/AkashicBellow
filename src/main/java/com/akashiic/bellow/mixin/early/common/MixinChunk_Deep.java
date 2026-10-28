@@ -23,7 +23,8 @@ import com.akashiic.bellow.api.IDeepWorld;
 /**
  * Routes {@code storageArrays[y >> 4]} to the deep sections when the index is negative.
  * <p>
- * Only array element accesses are redirected (no {@code CallbackInfo} allocation on these hot paths). The surrounding
+ * The block/metadata/light reads only redirect array element accesses (no {@code CallbackInfo} allocation on those
+ * hot paths); writes and light updates get a HEAD callback that creates the deep section first. The surrounding
  * vanilla logic keeps working unchanged because {@code y & 15} already yields the correct local Y for negative Y and
  * the heightmap of a column is never below 0, so deep writes never touch skylight bookkeeping.
  */
@@ -102,7 +103,9 @@ public abstract class MixinChunk_Deep implements IDeepChunk {
 
     /*
      * storageArrays[y >> 4] reads. The ordinal counts every access to the field: getBlock/getBlockMetadata first read
-     * storageArrays.length, so their indexed read is the second access.
+     * storageArrays.length, so their indexed read is the second access. getAreLevelsEmpty clamps its lower bound to 0,
+     * so its read never sees a negative index (its deep part is answered by bellow$deepLevelsEmpty); the redirect is
+     * kept as a guard should another mod remove that clamp.
      */
     @Redirect(
         method = { "func_150807_a(IIILnet/minecraft/block/Block;I)Z", "setBlockMetadata(IIII)Z",

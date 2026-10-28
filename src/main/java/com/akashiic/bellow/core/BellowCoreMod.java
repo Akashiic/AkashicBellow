@@ -33,6 +33,7 @@ public class BellowCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
         mixins.add("common.MixinChunk_DeepLoad");
         mixins.add("common.MixinChunk_LegacyPopulate");
         mixins.add("common.MixinChunk_DeepTileEntity");
+        mixins.add("common.MixinAnvilChunkLoader_DeepTiles");
         mixins.add("common.MixinChunkCache_Deep");
         // lighting: exactly one of the two, matching ArchaicFix's own decision
         Compat.crucible = EnvironmentDetector.classExists(EnvironmentDetector.CRAFTBUKKIT_SERVER);
@@ -44,6 +45,7 @@ public class BellowCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
         }
         // network
         mixins.add("common.MixinPlayerInstance_Deep");
+        mixins.add("common.MixinEntityPlayerMP_DeepTiles");
         mixins.add("common.PlayerManagerAccessor");
         mixins
             .add(Compat.crucible ? "common.MixinPlayerManagerQueue_Crucible" : "common.MixinPlayerManagerQueue_Forge");
@@ -52,6 +54,9 @@ public class BellowCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
             mixins.add("crucible.MixinCraftWorld_Deep");
             mixins.add("crucible.MixinCraftChunk_Deep");
             mixins.add("crucible.MixinCraftBlock_Deep");
+            // Spigot/CraftBukkit rewrites of vanilla methods with their own Y >= 0 limits.
+            mixins.add("crucible.MixinWorld_DeepCollision");
+            mixins.add("crucible.MixinEntityFallingBlock_DeepCrucible");
         }
         mixins.add("common.MixinC07PacketPlayerDigging_SignedY");
         mixins.add("common.MixinC08PacketPlayerBlockPlacement_SignedY");
@@ -59,6 +64,7 @@ public class BellowCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
         mixins.add("common.MixinS0APacketUseBed_SignedY");
         // gameplay
         mixins.add("common.MixinWorldServer_DeepTicks");
+        mixins.add("common.MixinWorld_DeepEntityChunk");
         mixins.add("common.MixinEntity_DeepVoid");
         mixins.add("common.MixinEntityMinecart_DeepVoid");
         mixins.add("common.MixinEntityFallingBlock_Deep");
@@ -69,6 +75,10 @@ public class BellowCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
         mixins.add("common.MixinBlockPlants_Deep");
         mixins.add("common.MixinPathFinder_Deep");
         mixins.add("common.MixinSpawnerAnimals_Deep");
+        mixins.add("common.MixinBlockPortalSize_Deep");
+        mixins.add(Compat.crucible ? "crucible.MixinTeleporter_DeepCrucible" : "common.MixinTeleporter_Deep");
+        mixins.add("common.MixinEntityEnderman_Deep");
+        mixins.add("common.MixinBlockFluidFinite_Deep");
 
         if (FMLLaunchHandler.side()
             .isClient()) {

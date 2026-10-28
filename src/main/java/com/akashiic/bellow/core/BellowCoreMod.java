@@ -86,6 +86,7 @@ public class BellowCoreMod implements IFMLLoadingPlugin, IEarlyMixinLoader {
             mixins.add("client.MixinChunkCache_DeepClient");
             mixins.add("client.MixinEntityRenderer_DeepFog");
             mixins.add("client.MixinWorldClient_DeepParticles");
+            mixins.add("client.MixinRenderGlobal_DeepSky");
             // Angelica (Celeritas) replaces terrain rendering; it gets its own late compat mixins.
             if (!EnvironmentDetector.classExists("com.gtnewhorizons.angelica.AngelicaMod")) {
                 mixins.add("client.MixinRenderGlobal_Deep");

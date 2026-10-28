@@ -173,7 +173,13 @@ crescendo para o fundo, ferro concentrado perto de 0, cobre só no topo da faixa
   mod está carregado) ajustam `AngelicaRenderSectionManager` (minSection, `isSectionVisuallyEmpty`),
   `getMinimumBuildHeight`, `ClonedChunkSection` (limite vertical e leitura da seção), o `WorldSlice` (seções
   profundas e piso da luz) e `CompatMathHelper.clampHeight`.
-* Neblina do vazio e partículas de profundidade deslocadas por `minY`.
+* Neblina do vazio e partículas de profundidade deslocadas por `minY`. Como na 1.18, o céu escurece só nos 32
+  blocos acima do piso (no vanilla, de Y 32 a 0).
+* Céu: abaixo do horizonte o `renderSky` desenha uma caixa preta sob a câmera até o fundo do mundo
+  (`-(eyeY - 63 + 65)`, ou seja até Y −2). Abaixo disso a caixa ficava de cabeça para baixo e as paredes dela, a um
+  bloco da câmera, cobriam o céu inteiro menos um quadradinho no zênite (medido: a −40 só 13% do centro da imagem
+  era céu; a −10 uma faixa preta contornava a abertura). Medida a partir do piso, fica sob a câmera em qualquer
+  renderer (o Angelica mantém o céu vanilla).
 
 ## 9. Compatibilidade conhecida
 
@@ -326,6 +332,9 @@ inteira abaixo de 0. Não afeta a proteção dos claims.
   da subida; com a câmera parada, a parede inteira dos dois lados do Y 0 em todo quadro e nenhum quadro que destoe
   dos vizinhos. Passa no renderer vanilla e no Angelica (~140 quadros cada); um buraco do tamanho de um bloco e uma
   fenda de 25 px na junção, injetados num quadro, são reprovados.
+  Céu: num poço aberto do piso + 4 até o céu, ao meio-dia, a câmera olha para cima (FOV 30) em Y 100, 40, 10, −10 e
+  −40; o centro da imagem tem de ser céu e a borda da abertura não pode ter faixa preta. Sem a correção da caixa do
+  céu, −10 e −40 são reprovados; com ela passa no vanilla e no Angelica.
 
 ## 11. Riscos abertos (beta)
 

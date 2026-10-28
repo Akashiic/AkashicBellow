@@ -14,6 +14,9 @@ sections are rebuilt).
 * Still and edit: the wall is drawn on both sides of Y 0 in every frame with a constant share of the picture, and no
   frame pops out of the sequence (differs from both neighbours while they agree). With a moving camera that test
   does not hold for textured surfaces, so motion is judged by the two checks above.
+* Sky, single shots looking straight up an open pit at several heights (bellow-sky-<y>.png): the middle of the
+  picture is sky, and no black band lines the opening (the box vanilla draws under the camera below the horizon
+  turned upside down below Y -2 and covered the sky).
 Prints PASS/FAIL lines and exits 1 on any failure.
 """
 import glob
@@ -24,6 +27,7 @@ import numpy as np
 from PIL import Image
 
 SEQUENCES = ("still", "rise", "turn", "edit")
+SKY_HEIGHTS = (100, 40, 10, -10, -40)
 
 
 def load(path):
@@ -34,15 +38,48 @@ def diff(a, b):
     return float(np.mean(np.abs(a - b)))
 
 
-def masks(f):
+def masks(f, least=30):
     r, g, b = f[..., 0], f[..., 1], f[..., 2]
     # channel ratios, not differences: the dark pixels of the glowstone texture are brownish red, and the wool is
     # much darker in the middle of the wall than at its edges
-    red = (r > 30) & (r > 1.8 * g) & (r > 1.8 * b)
-    blue = (b > 30) & (b > 1.6 * r) & (b > 1.4 * g)
+    red = (r > least) & (r > 1.8 * g) & (r > 1.8 * b)
+    blue = (b > least) & (b > 1.6 * r) & (b > 1.4 * g)
     sky = (b > 200) & (g > 130) & (b > r + 40)
     void = f.mean(axis=2) < 10
     return red, blue, sky | void
+
+
+def grow(mask, n):
+    out = mask.copy()
+    for _ in range(n):
+        g = out.copy()
+        g[1:] |= out[:-1]
+        g[:-1] |= out[1:]
+        g[:, 1:] |= out[:, :-1]
+        g[:, :-1] |= out[:, 1:]
+        out = g
+    return out
+
+
+def check_sky(root, check):
+    for y in SKY_HEIGHTS:
+        path = os.path.join(root, "bellow-sky-%d.png" % y)
+        if not os.path.isfile(path):
+            check("sky at Y %d" % y, False, "no " + os.path.basename(path))
+            continue
+        f = load(path)
+        h, w = f.shape[:2]
+        r, b = f[..., 0], f[..., 2]
+        sky = (b > r + 40) & (b > 150)
+        centre = float(np.mean(sky[h * 2 // 5:h * 3 // 5, w * 2 // 5:w * 3 // 5]))
+        # the box only turns upside down below Y -2; above 0 the rim of the pit is dark leaves, not checked
+        ring = grow(sky, 5) & ~sky
+        black = (f.max(axis=2) < 25) & (f.max(axis=2) - f.min(axis=2) < 8)
+        edge = float(np.mean(black[ring])) if ring.any() and y < 0 else 0.0
+        # measured without the fix: middle 0.13 sky at Y -40, edge 0.56 (Y -10) and 0.30 (Y -40); with it 0.82, 0.05
+        # and 0.02 (a cloud can cross the middle)
+        check("sky at Y %d" % y, centre > 0.5 and edge < 0.15,
+              "middle %.2f sky (min 0.50), edge of the opening %.2f black (max 0.15)" % (centre, edge))
 
 
 def main():
@@ -87,9 +124,11 @@ def main():
             check("Y 0 seam straight and closed while rising", not bad, "frames with a broken seam: %s" % bad)
 
         if seq in ("still", "edit"):
+            # vanilla torch flicker moves block light a little every tick and the middle of the wall is dark: with the
+            # 30 floor its blue pixels came and went (0.45..0.50 with no block missing); 12 keeps them all
             shares = [(float(np.mean(m[0][m[0].shape[0] // 4:-m[0].shape[0] // 4, m[0].shape[1] // 4:-m[0].shape[1] // 4])),
                        float(np.mean(m[1][m[1].shape[0] // 4:-m[1].shape[0] // 4, m[1].shape[1] // 4:-m[1].shape[1] // 4])))
-                      for m in (masks(f) for f in frames)]
+                      for m in (masks(f, 12) for f in frames)]
             reds = [s[0] for s in shares]
             blues = [s[1] for s in shares]
             ok = min(reds) > 0.05 and min(blues) > 0.05 and max(reds) - min(reds) < 0.05 \
@@ -104,6 +143,7 @@ def main():
             check("no frame pops out (%s)" % seq, max(pops) < 3.0, "worst %.2f (limit 3.0)" % max(pops))
             change = max(diff(frames[i - 1], frames[i]) for i in range(1, len(frames)))
             check("stable picture (%s)" % seq, change < 2.0, "max frame-to-frame change %.2f (limit 2.0)" % change)
+    check_sky(root, check)
     print("FRAMES RESULT " + ("PASS" if failures == 0 else "FAIL (%d)" % failures))
     sys.exit(1 if failures else 0)
 

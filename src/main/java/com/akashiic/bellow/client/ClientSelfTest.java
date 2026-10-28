@@ -31,7 +31,8 @@ import cpw.mods.fml.common.gameevent.TickEvent;
 /**
  * Headless client verification ({@code -Dakashicbellow.clienttest=true}): creates a single player world, builds a lit
  * room below Y 0, compares what the client received with the server, checks wall torch placement and takes
- * screenshots, then quits. Report: {@code akashicbellow-clienttest.txt} in the game directory.
+ * screenshots (frames across Y 0, the sky seen up an open pit at several heights), then quits. Report:
+ * {@code akashicbellow-clienttest.txt} in the game directory.
  */
 public final class ClientSelfTest {
 
@@ -165,6 +166,9 @@ public final class ClientSelfTest {
                 case 11: // frames 4: still camera while deep and surface blocks change (section rebuilds)
                     this.frameStep(mc);
                     break;
+                case 12: // sky seen from an open pit at several heights, down to the deep layer
+                    this.skyStep(mc);
+                    break;
                 default:
                     break;
             }
@@ -215,10 +219,62 @@ public final class ClientSelfTest {
             if (++this.state > 11) {
                 this.editing = false;
                 this.camActive = false;
+                this.skyRequested = true;
+            }
+        }
+    }
+
+    // Sky check: a pit open from the floor to the sky, camera looking straight up (noon: the sun is overhead).
+    private static final int[] SKY_HEIGHTS = { 100, 40, 10, -10, -40 };
+    private int px, pz;
+    private volatile boolean skyRequested;
+    private volatile boolean skyReady;
+    private int skyIndex;
+    private volatile float camPitch;
+
+    private void skyStep(Minecraft mc) {
+        if (!this.skyReady) return;
+        this.camActive = true; // brings the player to the pit
+        if (mc.theWorld.getBlock(this.px + 13, -40, this.pz) == Blocks.air
+            || mc.theWorld.getBlock(this.px, -40, this.pz) != Blocks.air) {
+            this.camY = SKY_HEIGHTS[0];
+            this.camPitch = -90.0F;
+            return;
+        }
+        if (this.timer == 0) {
+            mc.gameSettings.fovSetting = 30.0F;
+            this.camY = SKY_HEIGHTS[this.skyIndex];
+            this.camPitch = -90.0F;
+            this.camYaw = 0.0F;
+        }
+        mc.thePlayer.motionX = mc.thePlayer.motionY = mc.thePlayer.motionZ = 0;
+        if (++this.timer > (this.skyIndex == 0 ? 200 : 60)) {
+            this.shot(mc, "bellow-sky-" + SKY_HEIGHTS[this.skyIndex]);
+            this.timer = 0;
+            if (++this.skyIndex >= SKY_HEIGHTS.length) {
+                this.camActive = false;
+                mc.gameSettings.fovSetting = 70.0F;
                 mc.gameSettings.hideGUI = false;
                 this.finish(mc);
             }
         }
+    }
+
+    /** 25 x 25 pit, open from just above the floor to the sky, far from where the client has been. */
+    private void buildSkyPit() {
+        WorldServer w = MinecraftServer.getServer()
+            .worldServerForDimension(0);
+        int minY = BellowAPI.getMinY(w);
+        this.px = this.bx + 400;
+        this.pz = this.bz;
+        for (int dx = -2; dx <= 2; dx++) for (int dz = -2; dz <= 2; dz++)
+            w.theChunkProviderServer.loadChunk((this.px >> 4) + dx, (this.pz >> 4) + dz);
+        for (int y = 255; y >= minY + 4; y--) for (int dx = -12; dx <= 12; dx++) for (int dz = -12; dz <= 12; dz++) {
+            if (w.getBlock(this.px + dx, y, this.pz + dz) != Blocks.air)
+                w.setBlock(this.px + dx, y, this.pz + dz, Blocks.air, 0, 2);
+        }
+        // a marker in the wall: the client has the pit once it sees this stone and air at the centre
+        for (int y = minY + 4; y < 0; y++) w.setBlock(this.px + 13, y, this.pz, Blocks.stone, 0, 2);
     }
 
     @SubscribeEvent
@@ -246,6 +302,11 @@ public final class ClientSelfTest {
             this.surfaceReady = true;
             return;
         }
+        if (event.phase == TickEvent.Phase.END && this.skyRequested && !this.skyReady) {
+            this.buildSkyPit();
+            this.skyReady = true;
+            return;
+        }
         if (event.phase == TickEvent.Phase.END && this.boundaryRequested && !this.boundaryReady) {
             this.buildBoundaryRoom();
             this.boundaryReady = true;
@@ -254,7 +315,12 @@ public final class ClientSelfTest {
         if (event.phase == TickEvent.Phase.END && this.camActive) {
             EntityPlayerMP p = (EntityPlayerMP) MinecraftServer.getServer()
                 .worldServerForDimension(0).playerEntities.get(0);
-            p.playerNetServerHandler.setPlayerLocation(this.bx + 0.5, this.camY, this.bz - 3.5, this.camYaw, 0.0F);
+            if (this.state == 12) {
+                p.playerNetServerHandler
+                    .setPlayerLocation(this.px + 0.5, this.camY, this.pz + 0.5, this.camYaw, this.camPitch);
+            } else {
+                p.playerNetServerHandler.setPlayerLocation(this.bx + 0.5, this.camY, this.bz - 3.5, this.camYaw, 0.0F);
+            }
         }
         if (event.phase == TickEvent.Phase.END && this.editing
             && MinecraftServer.getServer()

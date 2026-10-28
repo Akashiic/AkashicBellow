@@ -3,8 +3,9 @@
 #
 #   tools/crucibletest.sh <server dir> [phase]        phase: full (default), compat, compatverify, bench
 #
-# The server directory must already contain the reobfuscated Bellow jar in mods/. Report: <dir>/akashicbellow-*.txt,
-# log: <dir>/crucibletest-<phase>.log.
+# The server directory must be a disposable copy marked with a .bellow-test-copy file (the world is deleted) and must
+# already contain the reobfuscated Bellow jar in mods/. Report: <dir>/akashicbellow-*.txt,
+# log: <dir>/crucibletest-<phase>.log. Exit status: the server's, or 1 if the report says FAIL.
 #
 # JVM flags follow the production command line, with three deliberate differences:
 #   - heap HEAP (default 9216M) instead of 14 GB, on test machines with less memory;
@@ -18,6 +19,12 @@ set -uo pipefail
 dir=${1:?server dir}
 phase=${2:-full}
 cd "$dir" || exit 2
+# Every phase but compatverify deletes the world: refuse to run on anything not explicitly marked as a test copy, so
+# pointing this at a real server by mistake cannot destroy its map. Mark a copy with: touch <dir>/.bellow-test-copy
+if [ ! -f .bellow-test-copy ]; then
+  echo "refusing: $PWD has no .bellow-test-copy marker (this script deletes world/). Use a copy of the server." >&2
+  exit 2
+fi
 rm -rf crash-reports akashicbellow-selftest.txt
 # compatverify reads back the world written by compat; every other phase starts from a new world
 [ "$phase" = compatverify ] || rm -rf world
@@ -37,4 +44,6 @@ rc=$?
 echo "crucible $phase rc=$rc"
 grep -ahE "^(FAIL|FINDING|RESULT|SKIP)" akashicbellow-*.txt 2>/dev/null
 ls crash-reports 2>/dev/null
-exit "$rc"
+[ "$rc" -ne 0 ] && exit "$rc"
+grep -aq "^RESULT FAIL" akashicbellow-*.txt 2>/dev/null && exit 1
+exit 0

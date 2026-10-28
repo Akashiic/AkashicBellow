@@ -8,6 +8,7 @@ import java.net.URL;
 import java.security.CodeSource;
 import java.security.MessageDigest;
 import java.security.ProtectionDomain;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -15,16 +16,17 @@ import java.util.jar.JarFile;
 /**
  * Patches the WorldEdit classes listed in {@link WorldEditPatches} as they are defined.
  * <p>
- * All or nothing: when the first target class is defined, every target entry of the jar it comes from is hashed. If
- * any differs from WorldEdit 6.1.9, no class is patched (a half-patched WorldEdit would select below 0 and then refuse
- * to edit there, or the reverse). Any failure keeps the original bytecode of that class.
+ * All or nothing per jar: when the first target class of a jar is defined, every target entry of that jar is hashed.
+ * If any differs from WorldEdit 6.1.9, no class from that jar is patched (a half-patched WorldEdit would select below
+ * 0 and then refuse to edit there, or the reverse). The verdict is kept per jar, so a plugin that bundles its own copy
+ * of WorldEdit classes is judged on its own bytes. Any failure keeps the original bytecode of that class.
  */
 final class WorldEditTransformer implements ClassFileTransformer {
 
     private static final String TAG = AgentMain.TAG;
 
-    /** null until the first target is seen; then whether the jar is the expected build. */
-    private Boolean enabled;
+    /** Verdict per defining jar (code source location): whether it is the expected build. */
+    private final Map<String, Boolean> verdicts = new HashMap<>();
 
     @Override
     public byte[] transform(ClassLoader loader, String name, Class<?> redefined, ProtectionDomain domain,
@@ -34,9 +36,10 @@ final class WorldEditTransformer implements ClassFileTransformer {
         if (target == null) return null;
         try {
             if (!enabled(domain)) return null;
-            // On Crucible, class transformers of the server (RetroFuturaBootstrap, "rfb-transformers" in cauldron.yml)
-            // run on plugin classes before agents do, so the bytes may differ from the verified jar entry. The source
-            // is already proven to be WorldEdit 6.1.9; each site must still match exactly, with its expected count.
+            // On Crucible the plugin class loader remaps classes before agents see them (SpecialSource with
+            // "remap-guava" in cauldron.yml renames com/google/common to guava10/...), so the bytes may differ from
+            // the verified jar entry. The jar is already proven to be WorldEdit 6.1.9; each site must still match
+            // exactly, with its expected count.
             String sha = sha256(bytes);
             String origin = target.sha256.equals(sha) ? ""
                 : " (already transformed upstream, sha256 " + sha + ")" + dump(name, bytes);
@@ -54,20 +57,24 @@ final class WorldEditTransformer implements ClassFileTransformer {
     }
 
     private synchronized boolean enabled(ProtectionDomain domain) {
-        if (this.enabled == null) {
-            String problem = verifyJar(domain);
-            this.enabled = problem == null;
-            report(
-                problem == null ? "WorldEdit 6.1.9 verified (" + WorldEditPatches.TARGETS.size() + " classes); patching."
-                    : problem + "; WorldEdit left untouched.");
-        }
-        return this.enabled;
-    }
-
-    /** null when every target entry of the defining jar has the expected hash, else what is wrong. */
-    static String verifyJar(ProtectionDomain domain) {
         CodeSource source = domain == null ? null : domain.getCodeSource();
         URL url = source == null ? null : source.getLocation();
+        String key = String.valueOf(url);
+        Boolean verdict = this.verdicts.get(key);
+        if (verdict == null) {
+            String problem = verifyJar(url);
+            verdict = problem == null;
+            this.verdicts.put(key, verdict);
+            report(
+                problem == null
+                    ? "WorldEdit 6.1.9 verified (" + WorldEditPatches.TARGETS.size() + " classes in " + url + "); patching."
+                    : problem + "; WorldEdit left untouched.");
+        }
+        return verdict;
+    }
+
+    /** null when every target entry of the jar at {@code url} has the expected hash, else what is wrong. */
+    static String verifyJar(URL url) {
         if (url == null) return "Cannot locate the WorldEdit jar";
         File file;
         try {

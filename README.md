@@ -91,7 +91,7 @@ tools/selftest.sh                    # servidor, 3 fases (cria → gera/verifica
 tools/selftest.sh -Pbellow.compatRun=true          # idem com EFR + EndlessIDs + ArchaicFix + Hodgepodge
 tools/clienttest.sh                                # cliente headless (xvfb), renderer vanilla
 tools/clienttest.sh -Pbellow.compatRun=true -Pbellow.angelica=true   # cliente com Angelica
-tools/crucibletest.sh <cópia do servidor> [fase]   # Crucible real (server.jar, mods, plugins, agents)
+tools/crucibletest.sh <cópia do servidor> [fase]   # Crucible real; apaga world/, só roda numa cópia com .bellow-test-copy
 ./gradlew -p agent build             # agent do WorldEdit em agent/build/libs
 ./gradlew -p agent test -Pbellow.weJar=<worldedit-bukkit-6.1.9.jar> -Pbellow.serverJar=<server.jar do Crucible>
 tools/wgdeep.py <servidor> [--world world] [--floor -64]   # regiões do WorldGuard que param em Y 0 (só leitura)

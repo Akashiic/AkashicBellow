@@ -26,3 +26,4 @@ set_gen false; phase bootstrap "$@"
 set_gen true;  phase full "$@"
 phase verify "$@"
 grep -h "^RESULT\|^FAIL" "$RUN"/akashicbellow-selftest-*.txt || true
+! grep -q "^RESULT FAIL" "$RUN"/akashicbellow-selftest-*.txt

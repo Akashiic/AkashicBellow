@@ -1,6 +1,8 @@
 package com.akashiic.bellow.weagent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -9,6 +11,9 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.CodeSource;
+import java.security.ProtectionDomain;
+import java.security.cert.Certificate;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Enumeration;
@@ -134,6 +139,20 @@ class WorldEditAgentTest {
         String out = runProbe(copy.getPath(), "vanilla");
         assertTrue(out.contains("WorldEdit left untouched"), out);
         assertTrue(!out.contains("Patched ") && !out.contains("CHECK FAIL"), out);
+
+        // The verdict belongs to the jar: another jar with the expected build is still patched in the same JVM.
+        WorldEditTransformer t = new WorldEditTransformer();
+        String cuboid = WorldEditPatches.WE + "regions/CuboidRegion";
+        byte[] bytes;
+        try (JarFile jar = new JarFile(WE_JAR)) {
+            bytes = read(jar, cuboid + ".class");
+        }
+        assertNull(t.transform(null, cuboid, null, domain(copy), bytes), "class from the other build");
+        assertNotNull(t.transform(null, cuboid, null, domain(new File(WE_JAR)), bytes), "class from WorldEdit 6.1.9");
+    }
+
+    private static ProtectionDomain domain(File jar) throws Exception {
+        return new ProtectionDomain(new CodeSource(jar.toURI().toURL(), (Certificate[]) null), null);
     }
 
     private static String runProbe(String weJar, String mode) throws Exception {

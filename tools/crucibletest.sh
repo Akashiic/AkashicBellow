@@ -31,6 +31,22 @@ rm -rf crash-reports akashicbellow-selftest.txt
 agents=()
 for a in *-agent.jar; do [ -f "$a" ] && agents+=("-javaagent:$PWD/$a"); done
 JAVA=${JAVA:-java}
+log="crucibletest-$phase.log"
+# Stall watchdog: if no report appears STALL seconds (default 600) after "Done", dump the threads once to
+# crucibletest-<phase>-stall.txt (the report is written only when the whole test finished).
+rm -f "crucibletest-$phase-stall.txt"
+(
+  server() { pgrep -f "java .*-Dakashicbellow.selftest.phase=$phase -jar server.jar" | head -1; }
+  sleep 30
+  until grep -aq 'Done (' "$log" 2>/dev/null; do sleep 5; [ -n "$(server)" ] || exit 0; done
+  for _ in $(seq 1 $(( ${STALL:-600} / 5 ))); do
+    ls akashicbellow-*.txt > /dev/null 2>&1 && exit 0
+    [ -n "$(server)" ] || exit 0
+    sleep 5
+  done
+  pid=$(server)
+  [ -n "$pid" ] && jstack "$pid" > "crucibletest-$phase-stall.txt" 2>&1 && echo "stall: threads dumped to crucibletest-$phase-stall.txt"
+) &
 timeout "${TIMEOUT:-3600}" "$JAVA" -Duser.timezone=America/Sao_Paulo -Dterminal.jline=false -Dterminal.ansi=true \
   -Dfile.encoding=UTF8 -Xms"${HEAP:-9216M}" -Xmx"${HEAP:-9216M}" -XX:+UseG1GC -XX:+ParallelRefProcEnabled \
   -XX:MaxGCPauseMillis=200 -XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC \
@@ -39,7 +55,7 @@ timeout "${TIMEOUT:-3600}" "$JAVA" -Duser.timezone=America/Sao_Paulo -Dterminal.
   -XX:InitiatingHeapOccupancyPercent=20 -XX:G1MixedGCLiveThresholdPercent=90 -XX:G1RSetUpdatingPauseTimePercent=5 \
   -XX:SurvivorRatio=32 -XX:+PerfDisableSharedMem -XX:MaxTenuringThreshold=1 "${agents[@]}" @java9args.txt \
   -Dfml.doNotBackup=true -Dfml.queryResult=confirm -Dakashicbellow.selftest=true -Dakashicbellow.selftest.exit=true \
-  -Dakashicbellow.selftest.phase="$phase" -jar server.jar nogui > "crucibletest-$phase.log" 2>&1 < <(exec sleep 86400)
+  -Dakashicbellow.selftest.phase="$phase" -jar server.jar nogui > "$log" 2>&1 < <(exec sleep 86400)
 rc=$?
 echo "crucible $phase rc=$rc"
 grep -ahE "^(FAIL|FINDING|RESULT|SKIP)" akashicbellow-*.txt 2>/dev/null

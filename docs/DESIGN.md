@@ -320,6 +320,30 @@ inteira abaixo de 0. Não afeta a proteção dos claims.
   | geração por chunk | 10,6 ms | 11,0 ms | 16,7 ms |
   | pacote de chunk | 4,0 KB | 5,2 KB | 9,8 KB |
   | disco por chunk | 6,8 KB | 7,7 KB | 11,7 KB |
+* **Chunk loader** (`-Dakashicbellow.selftest.phase=chunkload`, ou `tools/crucibletest.sh <cópia> chunkload`): um
+  ticket do Forge (o mesmo mecanismo dos chunk loaders do pack: BetterChunkLoaders/BCLForgeLib, usado pelo plugin
+  ForbiddenChunkLoaders, e os do DragonAPI) força 3×3 chunks longe de qualquer jogador, com 0 jogadores no servidor.
+  No chunk do meio, o mesmo conjunto é montado na superfície (Y 200) e na camada profunda (piso + 10): uma fornalha
+  com minério e carvão (tick de TileEntity), 64 blocos de gelo sob glowstone (ticks aleatórios: o gelo derrete com luz
+  de bloco acima de 8) e um porco (atualização de entidade). Uma área igual, só carregada e sem ticket, serve de
+  controle. Após 1200 ticks:
+
+  | | Forge (dev) | Crucible de produção (pack inteiro) |
+  |---|---|---|
+  | forçado, superfície | 6 lingotes, gelo 38/64, porco 1200/1200 | 5 lingotes, gelo 44/64, porco 1198/1200 |
+  | forçado, profundo (−54) | 6 lingotes, gelo 32/64, porco 1200/1200 | 5 lingotes, gelo 32/64, porco 1198/1200 |
+  | sem ticket, profundo | descarregado; gelo 0/64, porco parado | descarregado; nada roda |
+
+  Esperado por bloco de gelo: 1 − e^(−1200·3/4096) = 58% (~37 de 64); o teste exige ao menos 20. Sem o mixin que
+  injeta os ticks aleatórios das seções profundas, o profundo fica em 0/64 e é reprovado (verificado). Achados:
+  * Um único chunk forçado sem os vizinhos carregados não recalcula a luz (`World.updateLightByType` exige os
+    vizinhos), em qualquer altura: comportamento vanilla. Por isso o teste força 3×3.
+  * O `forgeChunkLoading.cfg` de produção dá cota 0 a mods sem entrada própria (só BCLForgeLib, DragonAPI e
+    Galacticraft têm cota). O teste precisa de uma entrada `akashicbellow` só na cópia; sem ela reprova com
+    "Forge refused a ticket".
+  * O plugin BungeeGuard desliga o servidor ao habilitar quando `settings.bungeecord` é `false` (cópia de teste
+    fora do proxy). As fases que rodam ticks no Crucible precisam dele fora da cópia; a fase `full` não percebia
+    porque termina antes do primeiro tick.
 * **Cliente headless** (`tools/clienttest.sh [-Pbellow.compatRun=true -Pbellow.angelica=true]`, via `xvfb-run` e
   Mesa llvmpipe): mundo singleplayer, sala iluminada em `minY + 24`, tocha de parede colocada como jogador, baú;
   compara cliente × servidor (blocos, meta, TE, luz) e tira screenshots em `run/client/screenshots/`. Uma placa

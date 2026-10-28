@@ -99,7 +99,8 @@ tools/wgdeep.py <servidor> [--world world] [--floor -64]   # regiões do WorldGu
 
 Num servidor com os mods do pack (jar reobfuscado em `mods/`), adicione
 `-Dakashicbellow.selftest=true -Dakashicbellow.selftest.exit=true -Dakashicbellow.selftest.phase=<fase>`:
-`compat` e depois `compatverify` (sonda de compatibilidade), ou `bench` (custo por chunk), num mundo novo.
+`compat` e depois `compatverify` (sonda de compatibilidade), `bench` (custo por chunk) ou `chunkload` (chunks forçados
+por ticket, sem jogadores: TileEntity, ticks aleatórios e entidades abaixo de 0), num mundo novo.
 
 O teste de cliente precisa de `xvfb-run` e EGL/Mesa (`libegl1 libegl-mesa0 libgles2`).
 Os relatórios ficam em `run/server/akashicbellow-selftest-*.txt` e `run/client/akashicbellow-clienttest.txt`;

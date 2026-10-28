@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs the Bellow self test on a copy of a real Crucible server (server.jar, mods/, plugins/, config/, agents).
 #
-#   tools/crucibletest.sh <server dir> [phase]        phase: full (default), compat, compatverify, bench
+#   tools/crucibletest.sh <server dir> [phase]        phase: full (default), compat, compatverify, bench, chunkload
 #
 # The server directory must be a disposable copy marked with a .bellow-test-copy file (the world is deleted) and must
 # already contain the reobfuscated Bellow jar in mods/. Report: <dir>/akashicbellow-*.txt,
@@ -13,6 +13,9 @@
 #     ~6 GB live set of the pack at 9 GB (at 40 % it does not);
 #   - stdin is an open pipe that never sends anything. With -Dterminal.jline=false, Crucible's console reader spins on
 #     end-of-file and queues empty ServerCommand objects until the heap is exhausted (2.7 GB measured in 3 minutes).
+# Phases that run ticks (compat, chunkload) need BungeeGuard out of the copy: with settings.bungeecord false it shuts
+# the server down while plugins are enabled. chunkload also needs an akashicbellow entry in forgeChunkLoading.cfg when
+# the copy gives mods without one a quota of 0.
 # Missing libraries: Crucible downloads them on first start; if a repository is unreachable, place the jar under
 # libraries/ with a .md5 file containing its md5 (Crucible's own cache marker).
 set -uo pipefail

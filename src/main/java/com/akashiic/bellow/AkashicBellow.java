@@ -41,6 +41,9 @@ public class AkashicBellow {
     public static final String MODID = "akashicbellow";
     public static final Logger LOG = LogManager.getLogger("AkashicBellow");
 
+    @Mod.Instance(MODID)
+    public static AkashicBellow instance;
+
     public static SimpleNetworkWrapper network;
 
     static {
@@ -71,6 +74,10 @@ public class AkashicBellow {
     @Mod.EventHandler
     public void init(FMLInitializationEvent event) {
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(new WorldEvents());
+        if (Boolean.getBoolean("akashicbellow.selftest")
+            && "chunkload".equals(System.getProperty("akashicbellow.selftest.phase"))) {
+            com.akashiic.bellow.selftest.ChunkLoadProbe.registerCallback();
+        }
         // Registered after EndlessIDs (dependency ordering), so the per-section packet budget already accounts for it.
         DataRegistry.registerDataManager(new DeepDataManager());
     }
@@ -94,6 +101,10 @@ public class AkashicBellow {
         String phase = System.getProperty("akashicbellow.selftest.phase", "full");
         if (phase.equals("bench")) {
             com.akashiic.bellow.selftest.Bench.run(server);
+            return;
+        }
+        if (phase.equals("chunkload")) {
+            com.akashiic.bellow.selftest.ChunkLoadProbe.start(server);
             return;
         }
         if (phase.startsWith("compat")) {

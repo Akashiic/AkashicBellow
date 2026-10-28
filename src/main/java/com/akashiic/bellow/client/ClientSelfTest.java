@@ -143,8 +143,27 @@ public final class ClientSelfTest {
                                 + (serverSign instanceof net.minecraft.tileentity.TileEntitySign
                                     ? ((net.minecraft.tileentity.TileEntitySign) serverSign).signText[0]
                                     : String.valueOf(serverSign)));
-                        this.finish(mc);
+                        this.boundaryRequested = true;
+                        this.state = 7;
+                        this.timer = 0;
                     }
+                    break;
+                case 7: // room across Y 0 (red wool below, blue above): wait until the client has it, then meshing
+                    if (this.boundaryReady && mc.theWorld.getBlock(this.bx, -3, this.bz + 6) == Blocks.wool
+                        && mc.theWorld.getBlock(this.bx, 3, this.bz + 6) == Blocks.wool
+                        && ++this.timer > 200) {
+                        mc.gameSettings.hideGUI = true;
+                        mc.gameSettings.viewBobbing = false;
+                        mc.thePlayer.capabilities.isFlying = true;
+                        this.state = 8;
+                        this.timer = 0;
+                    }
+                    break;
+                case 8: // frames 1: still camera, eye just below Y 0
+                case 9: // frames 2: rising through Y 0
+                case 10: // frames 3: turning
+                case 11: // frames 4: still camera while deep and surface blocks change (section rebuilds)
+                    this.frameStep(mc);
                     break;
                 default:
                     break;
@@ -159,6 +178,61 @@ public final class ClientSelfTest {
     private volatile boolean surfaceRequested;
     private volatile boolean surfaceReady;
 
+    // Frame capture across Y 0 (analysed by tools/clientframes.py): every rendered frame of states 8..11 is saved.
+    private int bx, bz;
+    private volatile boolean boundaryRequested;
+    private volatile boolean boundaryReady;
+    private volatile boolean editing;
+    private int frame;
+    private static final String[] SEQUENCES = { "still", "rise", "turn", "edit" };
+    private static final int SEQUENCE_TICKS = 44;
+    /** Ticks at the start of each sequence where the camera is placed but no frame is kept. */
+    private static final int SETTLE_TICKS = 10;
+    private volatile boolean capturing;
+    private volatile boolean camActive;
+    private volatile double camY;
+    private volatile float camYaw;
+
+    private void frameStep(Minecraft mc) {
+        int t = Math.max(0, this.timer++ - SETTLE_TICKS);
+        this.capturing = this.timer > SETTLE_TICKS;
+        double y = -1.0;
+        float yaw = 0.0F;
+        if (this.state == 9) y = -6.0 + 0.25 * t;
+        if (this.state == 10) yaw = -60.0F + 120.0F * t / SEQUENCE_TICKS;
+        this.editing = this.state == 11;
+        // The server moves the player (one authority for the camera: a client-side move would be corrected by the
+        // server a tick later and show up as camera jitter, not as a rendering problem).
+        this.camY = y;
+        this.camYaw = yaw;
+        this.camActive = true;
+        mc.thePlayer.motionX = mc.thePlayer.motionY = mc.thePlayer.motionZ = 0;
+        if (this.timer >= SEQUENCE_TICKS + SETTLE_TICKS) {
+            this.capturing = false;
+            this.out.add("FRAMES " + SEQUENCES[this.state - 8] + " " + this.frame);
+            this.frame = 0;
+            this.timer = 0;
+            if (++this.state > 11) {
+                this.editing = false;
+                this.camActive = false;
+                mc.gameSettings.hideGUI = false;
+                this.finish(mc);
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public void onRenderTick(TickEvent.RenderTickEvent event) {
+        if (event.phase != TickEvent.Phase.END || !this.capturing || this.state < 8 || this.state > 11) return;
+        Minecraft mc = Minecraft.getMinecraft();
+        ScreenShotHelper.saveScreenshot(
+            mc.mcDataDir,
+            String.format("frames-%s-%03d.png", SEQUENCES[this.state - 8], this.frame++),
+            mc.displayWidth,
+            mc.displayHeight,
+            mc.getFramebuffer());
+    }
+
     @SubscribeEvent
     public void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase == TickEvent.Phase.END && this.surfaceRequested && !this.surfaceReady) {
@@ -170,6 +244,27 @@ public final class ClientSelfTest {
             w.setBlock(this.x0 - 2, top, this.z0 + 3, Blocks.wool, 14, 3);
             p.playerNetServerHandler.setPlayerLocation(this.x0 + 0.5, top, this.z0 - 0.5, 0.0F, 30.0F);
             this.surfaceReady = true;
+            return;
+        }
+        if (event.phase == TickEvent.Phase.END && this.boundaryRequested && !this.boundaryReady) {
+            this.buildBoundaryRoom();
+            this.boundaryReady = true;
+            return;
+        }
+        if (event.phase == TickEvent.Phase.END && this.camActive) {
+            EntityPlayerMP p = (EntityPlayerMP) MinecraftServer.getServer()
+                .worldServerForDimension(0).playerEntities.get(0);
+            p.playerNetServerHandler.setPlayerLocation(this.bx + 0.5, this.camY, this.bz - 3.5, this.camYaw, 0.0F);
+        }
+        if (event.phase == TickEvent.Phase.END && this.editing
+            && MinecraftServer.getServer()
+                .getTickCounter() % 4 == 0) {
+            WorldServer w = MinecraftServer.getServer()
+                .worldServerForDimension(0);
+            boolean on = MinecraftServer.getServer()
+                .getTickCounter() % 8 == 0;
+            w.setBlock(this.bx + 2, -3, this.bz + 6, Blocks.wool, on ? 0 : 14, 3);
+            w.setBlock(this.bx - 2, 2, this.bz + 6, Blocks.wool, on ? 0 : 11, 3);
             return;
         }
         if (event.phase == TickEvent.Phase.END && this.signRequested && !this.signReady) {
@@ -279,6 +374,25 @@ public final class ClientSelfTest {
         this.check("server block light below Y 0", serverLight >= 13, "light=" + serverLight + " raw=" + serverRaw);
         this.check("client block light below Y 0", light >= 13, "light=" + light + " raw=" + clientRaw);
         this.check("player is below Y 0", mc.thePlayer.posY < 0, "posY=" + mc.thePlayer.posY);
+    }
+
+    /** 13 x 15 x 13 glowstone room from Y -8 to Y 8; the wall facing the player is red wool below 0, blue above. */
+    private void buildBoundaryRoom() {
+        WorldServer w = MinecraftServer.getServer()
+            .worldServerForDimension(0);
+        // next to the sign pocket, where the client already is: the surrounding chunks are loaded and meshed
+        this.bx = this.sx;
+        this.bz = this.sz + 30;
+        for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++)
+            w.theChunkProviderServer.loadChunk((this.bx >> 4) + dx, (this.bz >> 4) + dz);
+        for (int dx = -6; dx <= 6; dx++) for (int y = -8; y <= 8; y++) for (int dz = -6; dz <= 6; dz++) {
+            boolean shell = Math.abs(dx) == 6 || Math.abs(dz) == 6 || Math.abs(y) == 8;
+            Block block = !shell ? Blocks.air : dz == 6 ? Blocks.wool : Blocks.glowstone;
+            int meta = block == Blocks.wool ? y < 0 ? 14 : 11 : 0;
+            w.setBlock(this.bx + dx, y, this.bz + dz, block, meta, 2);
+        }
+        EntityPlayerMP p = (EntityPlayerMP) w.playerEntities.get(0);
+        p.playerNetServerHandler.setPlayerLocation(this.bx + 0.5, -1.0, this.bz - 3.5, 0.0F, 0.0F);
     }
 
     private void shot(Minecraft mc, String name) {

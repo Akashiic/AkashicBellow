@@ -319,6 +319,13 @@ inteira abaixo de 0. Não afeta a proteção dos claims.
   compara cliente × servidor (blocos, meta, TE, luz) e tira screenshots em `run/client/screenshots/`. Uma placa
   escrita abaixo de 0 num chunk que o cliente ainda não recebeu tem de chegar com o texto junto com o chunk (sem a
   correção do pacote de descrição, chega vazia: verificado).
+  Estabilidade da imagem: numa sala fechada que atravessa o Y 0 (lã vermelha abaixo, azul acima) cada quadro
+  renderizado é gravado em quatro sequências — câmera parada, subindo através do Y 0, girando 120°, e parada
+  enquanto blocos da parede mudam acima e abaixo de 0 (seções reconstruídas) — e `tools/clientframes.py` verifica:
+  nenhum pixel de céu ou vazio (seção não desenhada) em nenhum quadro; a junção do Y 0 reta e fechada em todo quadro
+  da subida; com a câmera parada, a parede inteira dos dois lados do Y 0 em todo quadro e nenhum quadro que destoe
+  dos vizinhos. Passa no renderer vanilla e no Angelica (~140 quadros cada); um buraco do tamanho de um bloco e uma
+  fenda de 25 px na junção, injetados num quadro, são reprovados.
 
 ## 11. Riscos abertos (beta)
 

@@ -342,4 +342,9 @@ inteira abaixo de 0. Não afeta a proteção dos claims.
 * Retrogen de minérios de outros mods que roda fora de `Chunk.populateChunk` (por exemplo a do CoFH, por tick) não
   passa pela guarda de §5 e pode deixar veios antigos abaixo de 0. No Crucible, os ticks aleatórios profundos usam o
   `growthOdds` do Spigot deixado pelo último chunk processado.
+* Numa das ~10 rodadas do teste no Crucible de produção (depois desta auditoria), a thread principal parou durante o
+  self-test e o servidor não terminou em 40 min; as 4 rodadas seguintes, com o mesmo jar, passaram. A causa não foi
+  determinada (o log foi sobrescrito antes de ser analisado; no ambiente de teste o LuckPerms e o voice chat tentam
+  conexões externas que expiram). `tools/crucibletest.sh` agora grava um dump das threads
+  (`crucibletest-<fase>-stall.txt`) se o relatório não sair 10 min depois do "Done".
 * Cavernas profundas: projeto separado.

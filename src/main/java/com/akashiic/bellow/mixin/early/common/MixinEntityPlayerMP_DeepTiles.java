@@ -13,7 +13,8 @@ import com.akashiic.bellow.api.BellowAPI;
  * When chunks are sent, the tile entities whose description packet follows are collected with
  * {@code WorldServer.func_147486_a(x, 0, z, x + 15, 256, z + 15)}, which filters {@code yCoord >= 0}: deep signs,
  * spawners, skulls and machines kept their default client state until their block changed. The lower Y bound becomes
- * the floor (same call in Forge and in Crucible).
+ * the floor. Forge only: CraftBukkit replaces that call with a walk over the chunk's tile entity map, which already
+ * includes the deep ones.
  */
 @Mixin(EntityPlayerMP.class)
 public abstract class MixinEntityPlayerMP_DeepTiles {

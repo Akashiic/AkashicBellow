@@ -10,17 +10,22 @@ import net.minecraft.world.chunk.Chunk;
  * overflow or another {@code VirtualMachineError} is not caught: it crashes the server with a report, because the
  * frames it unwound may have been nested chunk loads).
  * <p>
- * Order for one chunk, mirroring 1.18 (carvers, then features, then light):
+ * Bellow places no content below 0: the generators make the deep layer (its fill, its floor, its ores, its caves).
+ * Order for one chunk, mirroring 1.18 (noise terrain and carvers, then features, then light):
  * <ol>
- * <li>Bellow fills the deep layer (deep stone, bedrock floor) and replaces the legacy bedrock.</li>
- * <li>{@link #generateTerrain} of every generator.</li>
- * <li>Once the chunk and its 8 neighbours have their terrain: Bellow's ores, tuff and gravel (veins that discard on
- * air respect what step 2 carved), then {@link #decorate} of every generator. The chunk is marked decorated.</li>
+ * <li>Bellow creates the sections from the floor up to Y -1, empty.</li>
+ * <li>{@link #generateTerrain} of every generator. Then Bellow replaces the legacy bedrock at Y 0..4 where Y -1 is
+ * solid (its only write at Y >= 0), opening the old world into the new layer.</li>
+ * <li>Once the chunk and its 8 neighbours have their terrain: {@link #decorate} of every generator. The chunk is marked
+ * decorated.</li>
  * <li>After the world tick: the changed sections are sent again to players who already received them, then
  * {@link #onDecorated}.</li>
  * <li>After the world tick, once the 5x5 chunks around it are loaded and decorated: Bellow lights what the generators
  * placed (block light of every light source of the chunk, below 0), then {@link #onLit}.</li>
  * </ol>
+ * A dimension without any generator gets a provisional layer (stone over a bedrock floor) in chunks that stay not
+ * generated; the first generator installed later receives those chunks as retrogen chunks.
+ * <p>
  * Each step runs once per chunk, ever: what each generator did is saved with the chunk
  * ({@link BellowAPI#getGeneratorStages}), so a step that could not run before the chunk was unloaded (or the server
  * stopped) runs when it loads again. Chunks whose deep layer was generated before a generator was installed are never
@@ -50,29 +55,32 @@ public interface IDeepGenerator {
     }
 
     /**
-     * Terrain of one chunk, right after Bellow filled it, from inside {@code Chunk.onChunkLoad}.
+     * Terrain of one chunk, from inside {@code Chunk.onChunkLoad}: the whole deep layer of a new chunk (fill, floor,
+     * carved space). Every section from {@code minY >> 4} to -1 exists and is empty, except what the chunk already held
+     * below 0 on retrogen: blocks players or other mods put there, which must stay, and on a chunk made while no
+     * generator was installed, Bellow's provisional layer (stone, bedrock at the floor), which is meant to be replaced.
+     * Empty means no blocks: with ArchaicFix's lighting {@code ExtendedBlockStorage.isEmpty()} also counts light and
+     * may be false for a section without blocks.
      * <p>
      * Contract: touch this chunk only (no neighbour, no {@code World} block or tile entity access, no entities), only
-     * {@code minY..-1}, through {@link BellowAPI#getDeepSection} (every section of that range exists at this point).
-     * Blocks only: no tile entities, no light or neighbour updates (the layer is unlit stone at this point; light
-     * sources are lit by the light stage, see {@link #onLit}). Carve what is still the fill
-     * ({@link BellowAPI#isDeepFill}, {@link BellowAPI#isBaseStone}): on retrogen, a deep layer may already hold blocks
-     * players or other mods placed. Must be a function of the seed and the chunk position, so chunk borders match
-     * whatever order chunks are generated in.
+     * {@code minY..-1}, through {@link BellowAPI#getDeepSection}. Blocks only: no tile entities, no light or neighbour
+     * updates (light sources are lit by the light stage, see {@link #onLit}). Keep Y -1 solid where the old world
+     * should
+     * open into the layer: the legacy bedrock above is replaced only there. Must be a function of the seed and the
+     * chunk
+     * position, so chunk borders match whatever order chunks are generated in.
      *
-     * @param retrogen true when the chunk was saved before it had a deep layer (a chunk from an explored world that
-     *                 gets its deep layer now); its blocks at {@code y >= 0} may be player-built
+     * @param retrogen true when the chunk was saved before it had a deep layer (a chunk from an explored world, or one
+     *                 with the provisional layer only, that gets its deep layer now); its blocks at {@code y >= 0} may
+     *                 be player-built
      */
     default void generateTerrain(Chunk chunk, int minY, long seed, boolean retrogen) {}
 
     /**
-     * Features of the centre chunk of a 3x3 region, after Bellow's ores. Origins belong in the centre chunk; writes
+     * Features of the centre chunk of a 3x3 region. Origins belong in the centre chunk; writes
      * may reach the 8 neighbours (all have their terrain) through {@link IDeepRegion#setBlock},
      * {@link IDeepRegion#placeOre} and {@link IDeepRegion#placeBlob}, which only write {@code minY..-1} and send the
      * changes to players. No light updates here either; no World writes (World reads past the region load chunks).
-     * <p>
-     * "After Bellow's ores" covers the veins of this chunk and of neighbours decorated before it; a neighbour decorated
-     * later places its own veins, which may reach into this chunk (as in 1.18). Veins never replace air.
      * <p>
      * A neighbour decorated before ({@link IDeepRegion#genStateAt}) may be old and lived in. When a generator is added
      * to a world that already has deep layers, the chunks at the edge of what was generated before (terrain done, not

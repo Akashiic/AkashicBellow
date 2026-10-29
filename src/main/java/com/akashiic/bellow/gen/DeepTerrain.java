@@ -11,82 +11,77 @@ import com.akashiic.bellow.api.DeepConstants;
 import com.akashiic.bellow.storage.IDeepChunkInternal;
 
 /**
- * TERRAIN stage: solid deep block from the floor up to Y -1 with the 1.18 bedrock floor, plus optional replacement of
- * the natural bedrock that used to be the floor (Y 0..legacyBedrockMaxY).
- * <p>
- * Pure function of (seed, chunk position, config): chunk-local, needs no neighbour, never overwrites a non-air block.
+ * What the core itself does to a chunk's deep layer. It places no content: the deep layer is made by the registered
+ * generators ({@link com.akashiic.bellow.api.IDeepGenerator}). Chunk-local, needs no neighbour.
  */
 public final class DeepTerrain {
-
-    /** Salt of the positional random used by the bedrock gradient. */
-    static final long BEDROCK_SALT = 0x0BED20C4F1003L;
-    /** 1.18 {@code verticalGradient("bedrock_floor", aboveBottom(0), aboveBottom(5))}. */
-    static final int BEDROCK_GRADIENT = 5;
 
     private DeepTerrain() {}
 
     /**
-     * Probability that the block at {@code y} is bedrock: 1 at the floor, then {@code 1 - (y - minY) / 5}, i.e.
-     * 100%, 80%, 60%, 40%, 20% and 0% from Y = minY + 5 upward.
+     * Creates every section from the floor up to Y -1, empty where none existed (the generators' terrain step finds
+     * them all; what a chunk saved before its deep layer already held below 0 is kept).
      */
-    public static float bedrockChance(int y, int minY) {
-        int i = minY;
-        int j = minY + BEDROCK_GRADIENT;
-        if (y <= i) return 1.0F;
-        if (y >= j) return 0.0F;
-        return 1.0F - (float) (y - i) / (float) (j - i);
-    }
-
-    public static boolean isBedrock(long seed, int x, int y, int z, int minY) {
-        float p = bedrockChance(y, minY);
-        return p >= 1.0F || p > 0.0F && PositionalRandom.nextFloat(seed ^ BEDROCK_SALT, x, y, z) < p;
-    }
-
-    public static void fill(Chunk chunk, int minY, long seed) {
+    public static void prepare(Chunk chunk, int minY) {
         boolean hasSky = !chunk.worldObj.provider.hasNoSky;
         ExtendedBlockStorage[] deep = ((IDeepChunkInternal) chunk).bellow$getDeepSections();
-        Block fill = DeepBlocks.fill;
-        int fillMeta = DeepBlocks.fillMeta;
-        int baseX = chunk.xPosition << 4;
-        int baseZ = chunk.zPosition << 4;
-
         for (int sy = minY >> 4; sy < 0; sy++) {
             int slot = DeepConstants.slot(sy);
-            ExtendedBlockStorage ebs = deep[slot];
-            if (ebs == null) ebs = deep[slot] = new ExtendedBlockStorage(sy << 4, hasSky);
+            if (deep[slot] == null) deep[slot] = new ExtendedBlockStorage(sy << 4, hasSky);
+        }
+        chunk.setChunkModified();
+    }
+
+    /**
+     * Without any generator for the dimension: a provisional layer of stone over a bedrock floor (no ores, no caves),
+     * so nothing below 0 is void next to chunks that have a deep layer. Only air is written. The chunk is not marked
+     * generated and keeps its legacy bedrock: a generator installed later receives it as a retrogen chunk and replaces
+     * the stone (see {@link DeepGen}).
+     */
+    public static void provisional(Chunk chunk, int minY) {
+        prepare(chunk, minY);
+        ExtendedBlockStorage[] deep = ((IDeepChunkInternal) chunk).bellow$getDeepSections();
+        for (int sy = minY >> 4; sy < 0; sy++) {
+            ExtendedBlockStorage ebs = deep[DeepConstants.slot(sy)];
             for (int ly = 0; ly < 16; ly++) {
-                int y = (sy << 4) + ly;
+                Block block = (sy << 4) + ly == minY ? Blocks.bedrock : Blocks.stone;
                 for (int lz = 0; lz < 16; lz++) {
                     for (int lx = 0; lx < 16; lx++) {
                         if (ebs.getBlockByExtId(lx, ly, lz)
-                            .getMaterial() != Material.air) continue;
-                        if (isBedrock(seed, baseX + lx, y, baseZ + lz, minY)) {
-                            ebs.func_150818_a(lx, ly, lz, Blocks.bedrock);
-                        } else {
-                            ebs.func_150818_a(lx, ly, lz, fill);
-                            if (fillMeta != 0) ebs.setExtBlockMetadata(lx, ly, lz, fillMeta);
-                        }
+                            .getMaterial() == Material.air) ebs.func_150818_a(lx, ly, lz, block);
                     }
                 }
             }
         }
-
-        if (GenConfig.replaceLegacyBedrock) replaceLegacyBedrock(chunk, fill, fillMeta);
-        chunk.setChunkModified();
+        ((IDeepChunkInternal) chunk).bellow$setProvisional(true);
     }
 
-    private static void replaceLegacyBedrock(Chunk chunk, Block fill, int fillMeta) {
+    /**
+     * After the generators' terrain step: the natural bedrock at Y 0..legacyBedrockMaxY that used to be the floor
+     * becomes deepslate (or stone), opening the old world into the new layer (what 1.18 did when upgrading worlds). The
+     * only write of the core at Y >= 0, and only where the generators left Y -1 solid: a generator that failed or left
+     * the layer empty must not open a hole into the void. Only {@code Blocks.bedrock} is touched.
+     */
+    public static void replaceLegacyBedrock(Chunk chunk) {
+        if (!GenConfig.replaceLegacyBedrock) return;
         ExtendedBlockStorage bottom = chunk.getBlockStorageArray()[0];
-        if (bottom == null) return;
+        ExtendedBlockStorage below = ((IDeepChunkInternal) chunk).bellow$getDeepSections()[DeepConstants.slot(-1)];
+        if (bottom == null || below == null) return;
+        Block replacement = DeepBlocks.legacyReplacement();
         int maxY = Math.min(GenConfig.legacyBedrockMaxY, 15);
-        for (int y = 0; y <= maxY; y++) {
-            for (int z = 0; z < 16; z++) {
-                for (int x = 0; x < 16; x++) {
+        boolean changed = false;
+        for (int z = 0; z < 16; z++) {
+            for (int x = 0; x < 16; x++) {
+                if (below.getBlockByExtId(x, 15, z)
+                    .getMaterial() == Material.air) continue;
+                for (int y = 0; y <= maxY; y++) {
                     if (bottom.getBlockByExtId(x, y, z) != Blocks.bedrock) continue;
-                    bottom.func_150818_a(x, y, z, fill);
-                    bottom.setExtBlockMetadata(x, y, z, fillMeta);
+                    bottom.func_150818_a(x, y, z, replacement);
+                    bottom.setExtBlockMetadata(x, y, z, 0);
+                    changed = true;
                 }
             }
         }
+        if (changed) chunk.setChunkModified();
     }
 }

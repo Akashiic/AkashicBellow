@@ -1,19 +1,22 @@
 # Below Core
 
-Camadas negativas do mundo (Y < 0) para **Minecraft 1.7.10** (Forge 10.13.4.1614), no estilo 1.18+:
-deepslate, piso de bedrock em gradiente, minérios de deepslate com as distribuições da 1.18/1.20
-e retrogen para mundos que já existem.
+Núcleo das camadas negativas do mundo (Y < 0) para **Minecraft 1.7.10** (Forge 10.13.4.1614): armazenamento, motor,
+rede, luz, compatibilidade e a API para geradores. O BelowCore **não gera conteúdo** abaixo de 0: o que a camada
+profunda é (deepslate, piso de bedrock, minérios, cavernas) vem de um gerador registrado na API; no TEOF, do
+**VitaGenesis**.
 
-Status: **beta** (`0.1.0-beta.3`). Veja os riscos abertos em [docs/DESIGN.md §11](docs/DESIGN.md#11-riscos-abertos-beta).
+Status: **beta** (`0.1.0-beta.4`). Veja os riscos abertos em [docs/DESIGN.md §11](docs/DESIGN.md#11-riscos-abertos-beta).
 
 ## O que faz
 
 * Estende o mundo para baixo até um piso fixo por dimensão (padrão **−64**, configurável de −16 a **−512**).
   O teto continua 256 e nada acima de Y 0 muda de forma.
-* Gera o subsolo em chunks novos **e** em chunks salvos antes da instalação (retrogen no carregamento do chunk).
-* Com Et Futurum Requiem: deepslate, tufo, cobre e as variantes deepslate dos minérios (inclusive de outros mods
-  registrados no `DeepslateOreRegistry` do EFR). Sem EFR: pedra e minérios comuns.
-* Minérios gerados pelo porte linha a linha do `OreFeature` da 1.18 com as alturas/contagens da 1.20.1.
+* Entrega aos geradores cada chunk novo **e** cada chunk salvo antes da instalação (retrogen no carregamento), com as
+  seções abaixo de 0 vazias, e depois abre a bedrock antiga (Y 0..4) onde a camada ficou sólida.
+* Dá aos geradores a região 3×3, as primitivas de veio da 1.18 (`OreFeature`, com as variantes deepslate do Et Futurum
+  Requiem), a etapa de luz e as etapas depois do tick (API, abaixo).
+* Sem nenhum gerador, uma camada provisória de pedra com piso de bedrock (sem minérios nem cavernas), para que nada
+  abaixo de 0 seja vazio; o primeiro gerador instalado depois a substitui.
 
 O desenho, as decisões e o motivo de não usar CubicChunks estão em [docs/DESIGN.md](docs/DESIGN.md).
 
@@ -58,19 +61,22 @@ Detalhes em `docs/DESIGN.md` §9.1.
 | `general.minY` | −64 | piso (múltiplo de 16). **Travado por mundo** no primeiro uso em `<mundo>/akashicbellow.dat`. Custo medido: +46% de RAM por chunk em −64, 5× em −512 |
 | `general.dimensions` | `0` | dimensões com camada profunda |
 | `general.spawnMobsInDeep` | true | spawn natural também abaixo de 0 |
-| `worldgen.enabled` | true | gerar o subsolo |
-| `worldgen.retrogen` | true | preencher chunks antigos |
-| `worldgen.replaceLegacyBedrock` / `legacyBedrockMaxY` | true / 4 | trocar a bedrock antiga (Y 0..4) pelo bloco profundo |
-| `worldgen.deepBlock` | `auto` | bloco de preenchimento (`auto` = deepslate do EFR ou pedra) |
-| `worldgen.ores` | true | minérios, tufo e cascalho abaixo de 0 |
-| `worldgen.scaleBottomAnchoredCounts` | true | para pisos diferentes de −64, manter a densidade por volume |
-| `worldgen.oreCountMultiplier` | 1.0 | multiplicador global das contagens |
+| `worldgen.enabled` | true | rodar as etapas de geração (os geradores, a luz) |
+| `worldgen.retrogen` | true | entregar aos geradores os chunks salvos antes de terem camada |
+| `worldgen.replaceLegacyBedrock` / `legacyBedrockMaxY` | true / 4 | trocar a bedrock antiga (Y 0..4) por deepslate do EFR (ou pedra), onde a camada ficou sólida em Y −1 |
+| `worldgen.provisionalLayer` | true | sem nenhum gerador: camada provisória de pedra com piso de bedrock (substituída quando um gerador for instalado) |
+| `worldgen.stageBudgetMillis` | 10 | tempo por tick do mundo para a luz e os callbacks depois do tick |
+| `worldgen.strictGenerators` | false | testar geradores: recusa escritas pelo `World` que o contrato proíbe |
+
+Bloco de preenchimento, minérios e cavernas são configurados no gerador (VitaGenesis: categoria `layer`). As chaves
+`worldgen.deepBlock`, `worldgen.ores`, `worldgen.scaleBottomAnchoredCounts` e `worldgen.oreCountMultiplier` das
+versões anteriores não são mais lidas.
 
 ## Instalação num servidor existente
 
 1. **Backup do mundo.**
 2. Instale o jar no servidor e em todos os clientes; ajuste `minY` antes do primeiro boot (depois ele fica travado).
-3. Os chunks antigos recebem o subsolo à medida que são carregados (não há pré-geração; um pré-gerador comum
+3. Instale um gerador (VitaGenesis). Os chunks antigos recebem o subsolo à medida que são carregados (não há pré-geração; um pré-gerador comum
    que carregue os chunks também dispara o retrogen). `/bellow info` mostra o piso e o estado de geração do chunk atual,
    `/bellow stats [raio]` o histograma dos blocos abaixo de 0.
 
@@ -82,7 +88,7 @@ Desinstalar: o mundo continua abrindo, mas tudo abaixo de Y 0 é perdido.
 
 Cada push no `main` roda o workflow **Build**, que gera do mesmo commit o mod e o agent do WorldEdit (companion) e
 publica os dois como artifacts do mesmo run, sem zip: `AkashicBellow-<versão>.jar` e
-`AkashicBellow-WorldEdit-6.1.9-<versão>-agent.jar`, com `<versão>` = `0.1.0-beta.3-<commit>`. O resumo do run lista o
+`AkashicBellow-WorldEdit-6.1.9-<versão>-agent.jar`, com `<versão>` = `0.1.0-beta.4-<commit>`. O resumo do run lista o
 SHA-256 de cada jar.
 
 ## Compilar e testar
@@ -111,7 +117,7 @@ os screenshots em `run/client/screenshots/`.
 
 ## API
 
-`com.akashiic.bellow.api.BellowAPI` (versão da API 3, em `BellowAPI.apiVersion()`):
+`com.akashiic.bellow.api.BellowAPI` (versão da API 4, em `BellowAPI.apiVersion()`):
 
 * Leitura: `getMinY(world)`, `hasDeepLayers(world)`, `getDeepSection(chunk, sectionY)`, para mods que iteram seções
   diretamente e querem enxergar o subsolo. `IDeepChunk`/`IDeepWorld` são somente leitura.
@@ -126,13 +132,14 @@ os screenshots em `run/client/screenshots/`.
   [docs/DESIGN.md §5.1](docs/DESIGN.md#51-geradores-profundos-api).
 * Por chunk e por gerador: `getGeneratorStages(chunk, id)` (o que o gerador já fez ali) e `getGeneratorData(chunk,
   id)` (NBT do gerador, salvo com o subsolo e mantido sem o addon); `isDecorated(chunk)`, `isLightPending(chunk)`.
-* Blocos do subsolo: `getFillBlock()`/`getFillMeta()`, `isDeepFill`, `isBaseStone`, `isDeepHost`.
+* API 4: o núcleo não preenche a camada; os geradores recebem as seções vazias. Saíram `getFillBlock`, `getFillMeta`,
+  `isDeepFill`, `isBaseStone` e `isDeepHost` (da API 3).
 * `resendDeepSections(world, chunk, slotMask)`: reenvia seções escritas diretamente aos jogadores que já receberam o
   chunk.
 * Para testar um gerador: `worldgen.strictGenerators=true` recusa (e registra) escritas pelo `World` que o contrato
   proíbe durante `generateTerrain`/`decorate`; num self-test sem ticks, `runDeepStages(world)` roda na hora as etapas
   de depois do tick.
 
-Para depender da API, declare `required-after:akashicbellow` e confira `BellowAPI.apiVersion() >= 3` (ou a versão de
+Para depender da API, declare `required-after:akashicbellow` e confira `BellowAPI.apiVersion() >= 4` (ou a versão de
 que precisa) em tempo de execução, dentro de um `try`/`catch (NoSuchMethodError e)` (a API 1 não tem o método). Não compare a versão do mod:
 os builds de CI levam o sufixo do commit.

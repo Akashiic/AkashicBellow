@@ -2,7 +2,6 @@ package com.akashiic.bellow.api;
 
 import java.util.List;
 
-import net.minecraft.block.Block;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.util.LongHashMap;
 import net.minecraft.world.World;
@@ -10,7 +9,6 @@ import net.minecraft.world.WorldServer;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.chunk.storage.ExtendedBlockStorage;
 
-import com.akashiic.bellow.gen.DeepBlocks;
 import com.akashiic.bellow.gen.DeepGenerators;
 import com.akashiic.bellow.gen.DeepStages;
 import com.akashiic.bellow.mixin.early.common.PlayerManagerAccessor;
@@ -24,17 +22,23 @@ import com.akashiic.bellow.storage.IDeepChunkInternal;
 public final class BellowAPI {
 
     /**
-     * Version of this API, raised whenever something is added. 2: deep generators ({@link #registerGenerator}) and
-     * {@link #resendDeepSections}. 3: generator stages after the world tick ({@link IDeepGenerator#onLit}, the light
+     * Version of this API, raised whenever something is added or removed. 2: deep generators
+     * ({@link #registerGenerator})
+     * and {@link #resendDeepSections}. 3: generator stages after the world tick ({@link IDeepGenerator#onLit}, the
+     * light
      * stage), per-chunk generator records and data ({@link #getGeneratorStages}, {@link #getGeneratorData}),
-     * {@link IDeepGenerator#appliesTo}, {@link IDeepGenerator#version}, priorities, the fill block and host predicates,
+     * {@link IDeepGenerator#appliesTo}, {@link IDeepGenerator#version}, priorities,
      * {@link IDeepRegion#placeOre}/{@link IDeepRegion#placeBlob}/{@link IDeepRegion#genStateAt},
-     * {@link #runDeepStages}. Read at runtime: call
+     * {@link #runDeepStages}.
+     * 4: Bellow is only the core: it places no content below 0 (no fill, no bedrock floor, no ores), the generators
+     * make
+     * the deep layer and receive its sections empty; the fill and host predicates of API 3 ({@code getFillBlock},
+     * {@code getFillMeta}, {@code isDeepFill}, {@code isDeepHost}, {@code isBaseStone}) are gone. Read at runtime: call
      * {@link #apiVersion()} (a mod compiled against version 2 that runs with version 1 gets a {@code NoSuchMethodError}
      * it can catch, instead of a value copied in at compile time).
      */
     public static int apiVersion() {
-        return 3;
+        return 4;
     }
 
     /** Same as {@link #apiVersion()}; not a compile-time constant, so javac does not copy it into other mods. */
@@ -141,56 +145,6 @@ public final class BellowAPI {
      */
     public static boolean isLightPending(Chunk chunk) {
         return ((IDeepChunkInternal) chunk).bellow$isLightPending();
-    }
-
-    // ---------------------------------------------------------------- blocks of the deep layer (server, after
-    // postInit)
-
-    /**
-     * The block the deep layer is filled with (deepslate with Et Futurum, else stone, or the configured one).
-     *
-     * @since API 3
-     */
-    public static Block getFillBlock() {
-        return DeepBlocks.fill;
-    }
-
-    /**
-     * Metadata of {@link #getFillBlock()}.
-     *
-     * @since API 3
-     */
-    public static int getFillMeta() {
-        return DeepBlocks.fillMeta;
-    }
-
-    /**
-     * Whether a block is the fill of the deep layer. A terrain step should carve only this (and
-     * {@link #isBaseStone}): anything else in a chunk that is still {@link DeepConstants#GEN_NONE} was put there by
-     * players or by another mod.
-     *
-     * @since API 3
-     */
-    public static boolean isDeepFill(Block block, int meta) {
-        return block == DeepBlocks.fill && meta == DeepBlocks.fillMeta;
-    }
-
-    /**
-     * Hosts that take the deepslate variant of an ore: the fill when it is not stone, and tuff.
-     *
-     * @since API 3
-     */
-    public static boolean isDeepHost(Block block, int meta) {
-        return DeepBlocks.isDeepHost(block, meta);
-    }
-
-    /**
-     * What ores and blobs replace: stone and the deep hosts (1.18 {@code base_stone_overworld} below 0).
-     *
-     * @since API 3
-     */
-    public static boolean isBaseStone(Block block, int meta) {
-        return DeepBlocks.isStoneHost(block, meta) || DeepBlocks.isDeepHost(block, meta);
     }
 
     /**

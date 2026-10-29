@@ -21,8 +21,8 @@ import com.akashiic.bellow.api.DeepConstants;
  * A chunk is lit once the 5x5 chunks around it are loaded and decorated ({@link DeepStages}): from then on no
  * decoration writes into the 3x3 its light can reach (a decoration writes at most one chunk away from its centre), so
  * one flood fill from the light sources of the chunk gives final values. Light 15 travels at most 14 blocks, so the
- * fill
- * never leaves the 3x3. The fill applies the rule of {@code World.computeLightValue} ({@code max(emission, neighbour -
+ * fill never leaves the 3x3. The fill applies the rule of {@code World.computeLightValue}
+ * ({@code max(emission, neighbour -
  * max(1, opacity))}, opaque emitters let light in) and only raises values, so the fills of all chunks add up to the
  * light of all their sources in any order, and values the World already computed (player-placed torches) stay. Only
  * {@code minY..-1} is lit: the 1.7.10 world above 0 is never touched.

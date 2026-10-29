@@ -9,7 +9,6 @@ import org.apache.logging.log4j.Logger;
 
 import com.akashiic.bellow.api.BellowAPI;
 import com.akashiic.bellow.gen.DeepBlocks;
-import com.akashiic.bellow.gen.DeepDecorator;
 import com.akashiic.bellow.gen.DeepGenerators;
 import com.akashiic.bellow.gen.DeepStages;
 import com.akashiic.bellow.net.DimensionInfoMessage;
@@ -85,6 +84,9 @@ public class AkashicBellow {
         }
         if (Boolean.getBoolean("akashicbellow.selftest")) {
             String phase = System.getProperty("akashicbellow.selftest.phase", "full");
+            // Bellow places no content below 0: the generator probe's phases get a test layer generator (other phases
+            // run without any generator, on the provisional layer)
+            if ("full".equals(phase) || "verify".equals(phase)) com.akashiic.bellow.selftest.TestLayer.register();
             if ("full".equals(phase)) com.akashiic.bellow.selftest.GeneratorProbe.register();
             if ("verify".equals(phase)) com.akashiic.bellow.selftest.GeneratorProbe.registerSecondOnly();
         }
@@ -95,7 +97,6 @@ public class AkashicBellow {
     @Mod.EventHandler
     public void postInit(FMLPostInitializationEvent event) {
         DeepBlocks.resolve();
-        DeepDecorator.resolve();
     }
 
     /** Deep generators are fixed from here on: every chunk of the session sees the same list. */

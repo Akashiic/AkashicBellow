@@ -19,8 +19,6 @@ import net.minecraft.world.gen.ChunkProviderServer;
 import com.akashiic.bellow.api.BellowAPI;
 import com.akashiic.bellow.api.DeepConstants;
 import com.akashiic.bellow.api.IDeepChunk;
-import com.akashiic.bellow.gen.DeepBlocks;
-import com.akashiic.bellow.gen.DeepTerrain;
 
 /**
  * In-game verification of the deep layer on a test server world. Every check prints PASS/FAIL with the measured
@@ -62,6 +60,7 @@ public final class SelfTest {
         try {
             if (phase.equals("verify")) {
                 this.verifyPersisted(minY);
+                com.akashiic.bellow.selftest.ProvisionalProbe.verify((WorldServer) this.world, minY, this::check);
                 com.akashiic.bellow.selftest.GeneratorProbe.verify((WorldServer) this.world, minY, this::check);
             } else {
                 this.retrogen(minY);
@@ -69,10 +68,10 @@ public final class SelfTest {
                 this.blocks(minY);
                 this.light(minY);
                 this.writePersistenceMarkers(minY);
-                this.ores(minY);
                 this.physics(minY);
                 this.portal(minY);
                 com.akashiic.bellow.selftest.GeneratorProbe.run((WorldServer) this.world, minY, this::check);
+                com.akashiic.bellow.selftest.ProvisionalProbe.run((WorldServer) this.world, minY, this::check);
                 com.akashiic.bellow.selftest.StorageProbe.run((WorldServer) this.world, this::check);
                 if (cpw.mods.fml.common.Loader.isModLoaded("BuildCraft|Core")) {
                     com.akashiic.bellow.selftest.BuildCraftProbe.run((WorldServer) this.world, this::check);
@@ -97,12 +96,16 @@ public final class SelfTest {
             .loadChunk(cx, cz);
     }
 
+    /**
+     * The deep layer of new chunks comes from the generators (here the test layer, {@link TestLayer}): Bellow hands
+     * them
+     * every section, empty, and afterwards replaces the legacy bedrock only where the layer is solid at Y -1.
+     */
     private void terrain(int minY) {
         int cx0 = 1000, cz0 = 1000;
         for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) this.load(cx0 + dx, cz0 + dz);
-        long[] bedrock = new long[6];
-        int columns = 0;
-        boolean floorSolid = true, aboveGradientClean = true, legacyGone = true, stateOk = true;
+        int columns = 0, legacyLeft = 0;
+        boolean floorSolid = true, stateOk = true, keptWhereOpen = true;
         for (int dz = -1; dz <= 1; dz++) {
             for (int dx = -1; dx <= 1; dx++) {
                 Chunk c = this.load(cx0 + dx, cz0 + dz);
@@ -111,36 +114,34 @@ public final class SelfTest {
                     for (int x = 0; x < 16; x++) {
                         columns++;
                         floorSolid &= c.getBlock(x, minY, z) == Blocks.bedrock;
-                        for (int k = 1; k <= 5; k++) if (c.getBlock(x, minY + k, z) == Blocks.bedrock) bedrock[k]++;
-                        for (int y = minY + 5; y < 0; y++) aboveGradientClean &= c.getBlock(x, y, z) != Blocks.bedrock;
+                        boolean open = dx == 0 && dz == 0 && x == 0 && z == 0; // the test layer left Y -1 air here
+                        if (open) {
+                            keptWhereOpen = c.getBlock(x, 0, z) == Blocks.bedrock;
+                            continue;
+                        }
                         if (GenConfig.replaceLegacyBedrock) for (int y = 0; y <= GenConfig.legacyBedrockMaxY; y++)
-                            legacyGone &= c.getBlock(x, y, z) != Blocks.bedrock;
+                            if (c.getBlock(x, y, z) == Blocks.bedrock) legacyLeft++;
                     }
                 }
             }
         }
+        com.akashiic.bellow.selftest.TestLayer layer = com.akashiic.bellow.selftest.TestLayer.INSTANCE;
         this.check("terrain state", stateOk, "");
-        this.check("bedrock at floor", floorSolid, columns + " columns");
-        StringBuilder freq = new StringBuilder();
-        boolean freqOk = true;
-        for (int k = 1; k <= 4; k++) {
-            double expected = DeepTerrain.bedrockChance(minY + k, minY);
-            double measured = (double) bedrock[k] / columns;
-            // 4 sigma of a binomial with n = 2304
-            double tolerance = 4 * Math.sqrt(expected * (1 - expected) / columns);
-            freqOk &= Math.abs(measured - expected) <= tolerance;
-            freq.append(String.format("y=floor+%d %.3f (exp %.2f) ", k, measured, expected));
-        }
         this.check(
-            "bedrock gradient",
-            freqOk && bedrock[5] == 0,
-            freq.toString()
-                .trim());
-        this.check("no bedrock above gradient", aboveGradientClean, "");
-        this.check("legacy bedrock replaced", legacyGone, "Y 0.." + GenConfig.legacyBedrockMaxY);
-        Block mid = this.load(cx0, cz0)
-            .getBlock(8, minY + 20, 8);
-        this.check("deep fill", mid != Blocks.air && mid != Blocks.bedrock, CommandNames.name(mid));
+            "generators receive every deep section, empty",
+            layer.calls > 0 && layer.missing == 0 && layer.notEmpty == 0,
+            layer.calls + " terrain calls, "
+                + layer.missing
+                + " sections missing, "
+                + layer.notEmpty
+                + " not empty"
+                + (layer.notEmptyAt.isEmpty() ? "" : " " + layer.notEmptyAt));
+        this.check("layer from the generator", floorSolid, columns + " columns with the test layer's bedrock floor");
+        this.check(
+            "legacy bedrock replaced where the layer is solid at Y -1, kept where it is open",
+            legacyLeft == 0 && keptWhereOpen,
+            legacyLeft + " legacy bedrock blocks left in solid columns; open column keeps Y 0 bedrock: "
+                + keptWhereOpen);
     }
 
     private void blocks(int minY) {
@@ -401,40 +402,7 @@ public final class SelfTest {
         this.check("retrogen replaced legacy bedrock", !GenConfig.replaceLegacyBedrock || legacyGone, "");
     }
 
-    private void ores(int minY) {
-        int cx0 = 1100, cz0 = 1100, radius = 5;
-        for (int dz = -radius - 1; dz <= radius + 1; dz++)
-            for (int dx = -radius - 1; dx <= radius + 1; dx++) this.load(cx0 + dx, cz0 + dz);
-        int decorated = 0, total = 0;
-        for (int dz = -radius; dz <= radius; dz++) for (int dx = -radius; dx <= radius; dx++) {
-            total++;
-            if (((IDeepChunk) this.load(cx0 + dx, cz0 + dz)).bellow$getGenState() == DeepConstants.GEN_DECORATED)
-                decorated++;
-        }
-        this.check("decoration ran", decorated == total, decorated + "/" + total + " chunks decorated");
-        Map<String, long[]> h = histogram(this.world, cx0, cz0, radius);
-        long diamonds = sum(h, "diamond_ore");
-        this.check(
-            "diamonds below 0",
-            diamonds > 0,
-            diamonds + " in " + total + " chunks (" + String.format("%.2f", diamonds / (double) total) + "/chunk)");
-        for (Map.Entry<String, long[]> e : h.entrySet()) {
-            StringBuilder b = new StringBuilder("INFO ").append(e.getKey())
-                .append(" per 16-band:");
-            for (long v : e.getValue()) b.append(' ')
-                .append(v);
-            this.out.add(b.toString());
-        }
-    }
-
-    private static long sum(Map<String, long[]> h, String fragment) {
-        long s = 0;
-        for (Map.Entry<String, long[]> e : h.entrySet()) if (e.getKey()
-            .contains(fragment)) for (long v : e.getValue()) s += v;
-        return s;
-    }
-
-    /** Counts every block below Y 0 that is neither the fill nor bedrock, per 16-block band (bottom band first). */
+    /** Counts every block below Y 0 but air and bedrock, per 16-block band (bottom band first). */
     public static Map<String, long[]> histogram(World world, int cx0, int cz0, int radius) {
         int minY = BellowAPI.getMinY(world);
         int bands = Math.max(0, -minY >> 4);
@@ -452,7 +420,7 @@ public final class SelfTest {
                         int x = i & 15, y = i >> 8, z = i >> 4 & 15;
                         Block b = ebs.getBlockByExtId(x, y, z);
                         int meta = ebs.getExtBlockMetadata(x, y, z);
-                        if (b == Blocks.bedrock || b == DeepBlocks.fill && meta == DeepBlocks.fillMeta) continue;
+                        if (b == Blocks.bedrock || b == Blocks.air) continue;
                         counts.computeIfAbsent(CommandNames.name(b, meta), k -> new long[bands])[band]++;
                     }
                 }

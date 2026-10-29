@@ -20,7 +20,9 @@ public final class DeepGen {
 
     /**
      * Start of {@code Chunk.onChunkLoad}: the deep terrain, so {@code ChunkEvent.Load} listeners already see it. Only
-     * this chunk is touched.
+     * this chunk is touched. The sections from the floor up to Y -1 are created (empty) and handed to the generators,
+     * which make the layer; without any generator for the dimension the chunk gets the provisional layer instead (see
+     * {@link DeepTerrain#provisional}).
      */
     public static void onChunkLoad(Chunk chunk) {
         World world = chunk.worldObj;
@@ -28,15 +30,23 @@ public final class DeepGen {
         int minY = BellowAPI.getMinY(world);
         if (minY >= 0) return;
         IDeepChunk deep = (IDeepChunk) chunk;
-        if (deep.bellow$getGenState() == DeepConstants.GEN_NONE) {
-            // fromDisk && state NONE: chunk saved before the install (or before this dimension was enabled).
-            boolean retrogen = deep.bellow$isFromDisk();
-            if (retrogen && !GenConfig.retrogen) return;
-            DeepTerrain.fill(chunk, minY, world.getSeed());
-            // deep generators carve the freshly filled layer, before any ore of the 3x3 stage (1.18: carvers first)
-            DeepGenerators.generateTerrain(chunk, minY, world.getSeed(), retrogen);
-            ((IDeepChunkInternal) chunk).bellow$setGenState(DeepConstants.GEN_TERRAIN);
+        if (deep.bellow$getGenState() != DeepConstants.GEN_NONE) return;
+        // fromDisk && state NONE: chunk saved before the install (or before this dimension was enabled), or with the
+        // provisional layer only
+        boolean retrogen = deep.bellow$isFromDisk();
+        if (retrogen && !GenConfig.retrogen) return;
+        IDeepChunkInternal state = (IDeepChunkInternal) chunk;
+        if (!DeepGenerators.anyFor(world)) {
+            // no generator makes this dimension's deep layer: a provisional one, once, or none; the chunk stays NONE
+            if (!state.bellow$isProvisional() && GenConfig.provisionalLayer) DeepTerrain.provisional(chunk, minY);
+            return;
         }
+        DeepTerrain.prepare(chunk, minY);
+        DeepGenerators.generateTerrain(chunk, minY, world.getSeed(), retrogen);
+        // after the generators, only where they left Y -1 solid (see replaceLegacyBedrock)
+        DeepTerrain.replaceLegacyBedrock(chunk);
+        state.bellow$setProvisional(false);
+        state.bellow$setGenState(DeepConstants.GEN_TERRAIN);
     }
 
     /**

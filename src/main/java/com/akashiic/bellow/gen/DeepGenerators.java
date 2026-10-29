@@ -93,10 +93,17 @@ public final class DeepGenerators {
         return !entries.isEmpty();
     }
 
+    /** Self test only: while true, no generator applies anywhere (the case of a server without a provider). */
+    private static volatile boolean hiddenForTests;
+
+    public static void hideForTests(boolean hidden) {
+        hiddenForTests = hidden;
+    }
+
     /** The generators that apply to a world, in order. A null world (unit tests) gets all of them. */
     static synchronized Entry[] forWorld(World world) {
         freeze();
-        if (entries.isEmpty()) return NONE;
+        if (entries.isEmpty() || hiddenForTests) return NONE;
         if (!(world instanceof WorldServer)) return world == null ? entries.toArray(NONE) : NONE;
         Entry[] cached = perWorld.get(world);
         if (cached != null) return cached;

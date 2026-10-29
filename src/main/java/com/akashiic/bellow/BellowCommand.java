@@ -19,7 +19,8 @@ import com.akashiic.bellow.api.IDeepChunk;
 
 /**
  * {@code /bellow info} - floor and deep state of the current chunk.<br>
- * {@code /bellow stats [radius]} - histogram of non-fill blocks below Y 0 in loaded chunks around the sender.<br>
+ * {@code /bellow stats [radius]} - histogram of the blocks below Y 0 (air and bedrock aside) in loaded chunks around
+ * the sender.<br>
  * {@code /bellow selftest} - runs {@link SelfTest} and prints the report. It writes blocks, chests and (on Crucible)
  * plugin regions and claims in the world, so it only runs on servers started with
  * {@code -Dakashicbellow.selftest=true}.

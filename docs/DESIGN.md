@@ -42,12 +42,12 @@ teto vanilla (256) intocado, e **nenhuma mudança no caminho Y ≥ 0**.
 * **NBT por chunk** via `ChunkAPI ChunkDataManager` (`akashicbellow:deep`), nunca na lista vanilla `Sections`
   (o leitor do ChunkAPI/vanilla faria `array[Y]` com Y negativo → exceção → chunk regenerado).
   ```
-  akashicbellow: { deep: { V: 1, Gen: byte, L: byte (luz pendente, só quando 1),
+  akashicbellow: { deep: { V: 1, Gen: byte, L: byte (luz pendente, só quando 1), P: byte (camada provisória, só quando 1),
                             Gens: { "<id do gerador>": { S: etapas feitas, F: etapas que falharam,
                                                          E: falhas de callback, V: versão, Data: {…} } },
                             Sections: [ {Y: byte(com sinal), <managers do ChunkAPI>} ] } }
   ```
-  `L` e `Gens` (§5.1) entraram sem subir `V`: versões anteriores ignoram as duas chaves (e as descartam ao salvar de
+  `L`, `P` (§5) e `Gens` (§5.1) entraram sem subir `V`: versões anteriores ignoram as duas chaves (e as descartam ao salvar de
   novo). Registros de geradores ausentes nesta sessão são mantidos e regravados intactos. Na leitura e no save eles
   são copiados: um chunk recarregado com o save ainda na fila é lido do mesmo compound que a thread de IO grava.
   Cada seção é serializada por `DataRegistryImpl.writeSubChunkToNBT`, ou seja, pelos mesmos managers que gravam as
@@ -87,27 +87,43 @@ teto vanilla (256) intocado, e **nenhuma mudança no caminho Y ≥ 0**.
   Y ≥ 0 no fim de `fillChunk`). O vanilla as criaria preguiçosamente, mas o meshing do Angelica lê um snapshot do
   mapa e proíbe criação nas threads de trabalho — sem isso baús e outros TESR abaixo de 0 não renderizavam.
 
-## 5. Geração — terreno e retrogen
+## 5. Geração — o núcleo não gera conteúdo
+
+Desde a beta.4 (API 4) o BelowCore é só o núcleo: ele traz as camadas negativas (armazenamento, motor, rede, luz,
+API) e **não coloca conteúdo abaixo de 0**. O que a camada profunda é (preenchimento, piso de bedrock, minérios,
+cavernas) vem dos geradores registrados na API (§5.1); no TEOF, do VitaGenesis. Antes da beta.4 o BelowCore
+preenchia a camada (deepslate, piso de bedrock 1.18) e gerava os minérios da 1.18; isso foi para o VitaGenesis.
 
 Estado por chunk (`Gen`): `0 NONE → 1 TERRAIN → 2 DECORATED`.
 
 **TERRAIN** (em `Chunk.onChunkLoad`, servidor, dimensões habilitadas — cobre carga síncrona, assíncrona e geração):
-* `minY ≤ y < 0`: bloco profundo (`etfuturum:deepslate` se existir, senão `minecraft:stone`; configurável).
-  Nunca sobrescreve um bloco não-ar.
-* Piso de bedrock no estilo 1.18 (`verticalGradient("bedrock_floor", aboveBottom(0), aboveBottom(5))`):
-  `P(bedrock | y) = clamp(1 − (y − minY)/5, 0, 1)` → 100%, 80%, 60%, 40%, 20%, 0% em minY..minY+5.
-  Sorteio **posicional e sem estado** (SplitMix64 de `seed ⊕ pos`), então o resultado não depende da ordem em que
-  os chunks são gerados. Medido: 0.810 / 0.597 / 0.387 / 0.194 (esperado 0.8 / 0.6 / 0.4 / 0.2).
-* **Bedrock legada** (Y 0..4, só `Blocks.bedrock`) → bloco profundo, em chunks novos e antigos (configurável),
-  abrindo passagem para baixo como a 1.18 fez. Nada mais acima de Y 0 é tocado em chunks antigos.
-* Retrogen: num mundo já explorado, **todo chunk antigo recebe o subsolo quando é carregado** — não há "lugar sem
-  geração", porque o terreno profundo é por chunk e não depende de vizinhos.
+1. As seções de `minY` até −1 são criadas, vazias (o que um chunk antigo já tinha abaixo de 0 fica).
+2. `generateTerrain` de cada gerador: a camada inteira.
+3. **Bedrock legada** (Y 0..4, só `Blocks.bedrock`) → deepslate do Et Futurum (ou pedra), **só nas colunas em que os
+   geradores deixaram Y −1 sólido**: abre o mundo antigo para a camada nova, como a 1.18 fez, mas um gerador que falhou
+   ou deixou a camada vazia não abre um buraco para o vazio. É a única escrita do núcleo em Y ≥ 0 (a regra de ouro do
+   VitaGenesis, nunca escrever em Y ≥ 0, continua absoluta).
+* Retrogen: num mundo já explorado, todo chunk antigo é entregue aos geradores quando é carregado
+  (`retrogen = true`), porque o terreno profundo é por chunk e não depende de vizinhos.
 
-**DECORATED** (minérios/tufo/cascalho): roda para o chunk C quando C e os 8 vizinhos estão carregados com TERRAIN.
-Vizinhança 3×3 (como a 1.18), nunca carrega chunk (sem cascata), escreve direto nas seções (sem update de luz:
-pedra opaca → minério opaco, luz 0 → 0). Chunks já vistos por jogadores recebem reenvio das seções alteradas.
-O intervalo Y ≥ 0 continua sendo da geração vanilla/modded 1.7.10 (sem dobrar o balanceamento do pack); os
-recursos são **cortados em Y < 0**.
+**Dimensão sem gerador** (nenhum instalado, ou nenhum que se aplique a ela; aviso no log ao carregar o mundo): os
+chunks novos recebem uma **camada provisória** de pedra sobre um piso de bedrock, sem minérios nem cavernas, para que
+nada abaixo de 0 seja vazio ao lado de chunks que têm camada (quem cavasse para o lado cairia até morrer). Esses chunks
+continuam `NONE`, ficam com a bedrock natural em Y 0..4 e levam a marca `P` (§3), então a camada provisória é feita
+uma vez só (um túnel cavado nela fica). O primeiro gerador instalado depois os recebe como chunks de retrogen e
+substitui a camada (o VitaGenesis reescreve a pedra, mantendo o que jogadores puseram). `worldgen.provisionalLayer =
+false` deixa esses chunks sem camada nenhuma (com a bedrock natural em Y 0, a superfície continua fechada).
+
+**DECORATED**: roda para o chunk C quando C e os 8 vizinhos estão carregados com TERRAIN, e só em dimensões com
+gerador: o `decorate` dos geradores. Vizinhança 3×3 (como a 1.18), nunca carrega chunk (sem cascata), escreve direto
+nas seções; a luz vem da etapa de luz (§7). Chunks já vistos por jogadores recebem reenvio das seções alteradas.
+
+**Primitivas de veio** (ficam no núcleo, usadas pelo VitaGenesis para todos os minérios): `IDeepRegion.placeOre` e
+`placeBlob`, com o `OreFeature` da 1.18 portado linha a linha (segmento elipsoidal com `size` esferas, eliminação de
+esferas contidas, `BitSet` de visita, `discardChanceOnAirExposure`; testes unitários da forma). Hospedeiros fixos:
+pedra → minério comum; deepslate e tufo do Et Futurum → variante deepslate via
+`ganymedes01.etfuturum.api.DeepslateOreRegistry` (cobre minérios de outros mods registrados no EFR); sem EFR, minério
+comum.
 
 **Fase de população legada.** Os geradores da 1.7.10 (decorador vanilla e todo `IWorldGenerator` de mod) foram
 escritos para um mundo que termina em Y 0: veios e manchas sorteados perto do fundo contavam com a escrita abaixo de 0
@@ -121,15 +137,14 @@ Os avisos "cascading worldgen" do ArchaicFix vistos nos testes aparecem também 
 
 ### 5.1 Geradores profundos (API)
 
-Outros mods (por exemplo o VitaGenesis, cavernas da 1.18) entram na geração do subsolo por
-`BellowAPI.registerGenerator(id, IDeepGenerator[, prioridade])`. Ordem para um chunk, espelhando a 1.18 (carvers,
-depois features, depois luz):
+Os geradores (o VitaGenesis no TEOF, ou de qualquer outro mod) fazem a camada profunda inteira; entram por
+`BellowAPI.registerGenerator(id, IDeepGenerator[, prioridade])`. Ordem para um chunk, espelhando a 1.18 (terreno e
+carvers, depois features, depois luz):
 
-1. Bellow preenche a camada profunda (bloco profundo, piso de bedrock) e troca a bedrock legada.
+1. Bellow cria as seções de `minY` até −1, vazias.
 2. `generateTerrain(chunk, minY, seed, retrogen)` de cada gerador, dentro do mesmo `Chunk.onChunkLoad`, antes de o
-   estado virar TERRAIN.
-3. Quando o chunk e os 8 vizinhos têm TERRAIN: minérios, tufo e cascalho do Bellow (os veios que descartam ao tocar ar
-   respeitam o que foi escavado no passo 2), depois `decorate(IDeepRegion)` de cada gerador. Estado DECORATED.
+   estado virar TERRAIN. Depois, Bellow troca a bedrock legada onde Y −1 ficou sólido (§5).
+3. Quando o chunk e os 8 vizinhos têm TERRAIN: `decorate(IDeepRegion)` de cada gerador. Estado DECORATED.
 4. **Depois do tick do mundo** (fora de qualquer carga de chunk): seções alteradas reenviadas (uma vez por chunk e
    tick, máscaras somadas), depois `onDecorated(world, chunk)`.
 5. **Depois do tick do mundo, quando o 5×5 em volta está carregado e decorado**: a etapa de luz do Bellow acende as
@@ -144,12 +159,13 @@ do laço de ticks chamam `BellowAPI.runDeepStages(world)`.
 ```java
 // postInit (o mod declara required-after:akashicbellow)
 // apiVersion() lança NoSuchMethodError com a API 1: chame dentro de try/catch
-if (BellowAPI.apiVersion() >= 3) BellowAPI.registerGenerator("vitagenesis:caves", new IDeepGenerator() {
-    @Override public String version() { return "1"; } // muda quando o formato das cavernas muda
+if (BellowAPI.apiVersion() >= 4) BellowAPI.registerGenerator("vitagenesis:caves", new IDeepGenerator() {
+    @Override public String version() { return "1"; } // muda quando o formato da camada muda
     @Override public void generateTerrain(Chunk chunk, int minY, long seed, boolean retrogen) {
         for (int sy = minY >> 4; sy < 0; sy++) {
             ExtendedBlockStorage ebs = BellowAPI.getDeepSection(chunk, sy);
-            // escava só o que ainda é o preenchimento: BellowAPI.isDeepFill / isBaseStone(bloco, meta)
+            // as seções chegam vazias: preencher, piso, cavernas. O que já não é ar (retrogen) foi posto por jogadores
+            // ou mods e fica; a camada provisória do Bellow (pedra, bedrock no piso) pode ser substituída
         }
     }
     @Override public void decorate(IDeepRegion region) {
@@ -173,38 +189,38 @@ Garantias:
   DECORATED) chegam ao `decorate` sem ter passado pelo `generateTerrain` dele (`getGeneratorStages` sem
   `STAGE_TERRAIN`); decore o que encontrar. `IDeepRegion.genStateAt` diz quais vizinhos já estavam decorados antes
   (possivelmente há muito tempo; `chunk.inhabitedTime` diz quanto tempo jogadores passaram ali).
-* `retrogen` = o chunk foi salvo antes de ter camada profunda (mundo antigo recebendo o subsolo agora); acima de 0 ele
-  pode ter construções.
+* `retrogen` = o chunk foi salvo antes de ter camada profunda (mundo antigo recebendo o subsolo agora, ou chunk só com
+  a camada provisória de quando não havia gerador); acima de 0 ele pode ter construções.
 * **Ordem**: prioridade crescente, depois id, qualquer que seja a ordem de carga dos mods (que muda quando se adiciona
   um mod). A lista é congelada no `FMLServerAboutToStartEvent` (ou na primeira geração), registrada no log e gravada
   por dimensão em `akashicbellow.dat` (`Generators`, com `id@version`); se mudar entre sessões, aviso no log (as
   cavernas podem não continuar na fronteira com o que foi gerado antes). Registro tardio ou id repetido lançam
   exceção. `appliesTo(WorldServer)` escolhe as dimensões de cada gerador (perguntado uma vez por mundo).
 * Uma exceção de um gerador é registrada no log (pilha completa nas 3 primeiras, depois só contagem) e o chunk segue;
-  os geradores seguintes rodam no mesmo chunk. Uma falha nos minérios do Bellow também não pula os geradores. O que
-  foi escrito antes da falha é marcado para salvar e reenviado (`finally`).
+  os geradores seguintes rodam no mesmo chunk. O que foi escrito antes da falha é marcado para salvar e reenviado
+  (`finally`).
 * **`StackOverflowError` não é engolido** (nem outro `VirtualMachineError`): os frames desempilhados podem ser cargas
   de chunk aninhadas, e o `originalLoadChunk` do Forge 1614 não tem `finally` (a chave fica em `loadingChunks`, o
   gerador vanilla fica com buffers pela metade). Derrubar o servidor com relatório é o resultado seguro.
 * **Decorações nunca se aninham**: um chunk carregado de dentro de uma decoração (um gerador lendo o `World` fora da
   região) só entra numa fila; os 3×3 que ele completa são decorados quando a decoração externa termina. Isso também
   limita a profundidade de pilha que a decoração soma a uma carga de chunk.
-* Com `ores = false`, a etapa 3 ainda roda se houver gerador registrado.
 * Os callbacks rodam fora da fase de população legada (`World.setBlock` abaixo de 0 funciona para eles).
 * Chunks com dados profundos de formato mais novo (somente leitura nesta sessão) recusam escrita: `IDeepRegion`,
-  veios do Bellow, `World` e o próprio `Chunk` (que antes criava seção para luz ou bloco e perdia no save).
+  veios, `World` e o próprio `Chunk` (que antes criava seção para luz ou bloco e perdia no save).
 
 Contrato:
 * Tudo na thread do servidor. `generateTerrain`: só o próprio chunk, só `minY..-1` por `BellowAPI.getDeepSection`
-  (toda seção da faixa existe neste ponto), só blocos (sem TileEntity, sem luz, sem vizinhos, sem `World`), função de
-  seed e posição (as bordas dos chunks batem em qualquer ordem de geração). Escave só o preenchimento
-  (`isDeepFill`/`isBaseStone`): num retrogen o subsolo pode ter blocos de jogadores ou de outro mod.
+  (toda seção da faixa existe neste ponto, vazia num chunk novo), só blocos (sem TileEntity, sem luz, sem vizinhos, sem
+  `World`), função de seed e posição (as bordas dos chunks batem em qualquer ordem de geração). Num retrogen, o que já
+  não é ar foi posto por jogadores ou mods e deve ficar (a camada provisória do Bellow é a exceção). Deixe Y −1 sólido
+  onde o mundo antigo deve abrir para a camada: a bedrock legada só é trocada ali.
 * `decorate`: origens no chunk central; escrita no 3×3 por `IDeepRegion.setBlock` (remove a TileEntity antiga, cria a
-  nova na hora), `placeOre` (veio da 1.18 com a variante deepslate do registro do Et Futurum) e `placeBlob` (forma de
-  veio que substitui qualquer pedra-base, como `ore_clay`), só `minY..-1`, sem luz nem atualização de vizinhos, sem
-  escrita pelo `World`.
-* `decorate`: "depois dos minérios" vale para os veios deste chunk e dos vizinhos decorados antes; um vizinho decorado
-  depois coloca os seus, que podem entrar neste chunk (como na 1.18). Veios nunca substituem ar.
+  nova na hora), `placeOre` (veio da 1.18: pedra → minério, deepslate/tufo do EFR → variante deepslate do registro do
+  Et Futurum) e `placeBlob` (forma de veio que substitui pedra, deepslate e tufo, como `ore_clay`), só `minY..-1`, sem
+  luz nem atualização de vizinhos, sem escrita pelo `World`.
+* `decorate`: um vizinho decorado depois coloca os seus veios, que podem entrar neste chunk (como na 1.18). Veios nunca
+  substituem ar.
 * `onDecorated`: o chunk está carregado; os vizinhos normalmente estão, mas confira (`chunkExists`) antes de depender
   deles. `onLit`: o 5×5 está carregado e decorado, a luz já está pronta e nenhuma decoração vai escrever no 3×3 em
   volta: escrita pelo `World` ali atualiza luz e vizinhos normalmente.
@@ -224,45 +240,12 @@ Contrato:
 
 Self-test: ver §10.2.
 
-## 6. Minérios — porte fiel da 1.18/1.20
+## 6. Minérios
 
-`OreFeature.place/doPlace` portado linha a linha (segmento elipsoidal com `size` esferas, eliminação de esferas
-contidas, `BitSet` de visita, `discardChanceOnAirExposure`), mais `UniformHeight`, `TrapezoidHeight`
-(`i + U[0,m] + U[0,l]`), `CountPlacement`, `InSquare`, `RarityFilter`. Testes unitários verificam a distribuição
-das alturas (qui-quadrado) e a forma dos veios.
-
-Alvo: pedra (`stone`) → minério comum; deepslate/tufo → variante deepslate via
-`ganymedes01.etfuturum.api.DeepslateOreRegistry` (cobre também minérios de outros mods registrados no EFR).
-Sem EFR: minério comum.
-
-| feature (1.20.1) | count | size | discard | altura | parte gerada |
-|---|---|---|---|---|---|
-| ore_gravel | 14 | 33 | 0 | uniform(bottom, top) | Y<0 |
-| ore_tuff | 2 | 64 | 0 | uniform(bottom, 0) | toda |
-| ore_iron_middle | 10 | 9 | 0 | trapezoid(−24, 56) | Y<0 |
-| ore_iron_small | 10 | 4 | 0 | uniform(bottom, 72) | Y<0 |
-| ore_gold (buried) | 4 | 9 | 0.5 | trapezoid(−64, 32) | Y<0 |
-| ore_gold_lower | U[0,1] | 9 | 0.5 | uniform(−64, −48) | toda |
-| ore_redstone | 4 | 8 | 0 | uniform(bottom, 15) | Y<0 |
-| ore_redstone_lower | 8 | 8 | 0 | trapezoid(aboveBottom(−32), aboveBottom(32)) | toda |
-| ore_diamond (small) | 7 | 4 | 0.5 | trapezoid(aboveBottom(−80), aboveBottom(80)) | toda |
-| ore_diamond_medium | 2 | 8 | 0.5 | uniform(−64, −4) | toda |
-| ore_diamond_large | 1/9 | 12 | 0.7 | trapezoid(aboveBottom(−80), aboveBottom(80)) | toda |
-| ore_diamond_buried | 4 | 8 | 1.0 | trapezoid(aboveBottom(−80), aboveBottom(80)) | toda |
-| ore_lapis | 2 | 7 | 0 | trapezoid(−32, 32) | Y<0 |
-| ore_lapis_buried | 4 | 7 | 1.0 | uniform(bottom, 64) | Y<0 |
-| ore_copper (EFR) | 16 | 10 | 0 | trapezoid(−16, 112) | Y<0 |
-| ore_emerald (montanhas) | 100 | 3 | 0 | trapezoid(−16, 480) | Y<0 |
-
-Com `minY = −64` os parâmetros são exatamente os da 1.20.1. Para outros pisos, âncoras `aboveBottom` acompanham o
-piso, âncoras absolutas ficam, e features `uniform(bottom, X)` podem ter a contagem escalada por
-`(X − minY + 1)/(X + 64 + 1)`: mais tentativas abaixo de −64, menos acima, com a densidade por volume preservada e o
-arredondamento estocástico preservando a esperança. A âncora `top` é a `top()` da 1.18 (Y 319). Como na 1.18, toda
-origem sorteada é colocada e só os blocos são cortados (a camada profunda escreve só abaixo de 0); por isso os veios
-com origem em Y 0..+6 alcançam a faixa −1..−5.
-
-Medido no teste de servidor (121 chunks, piso −64): ≈27 diamantes/chunk abaixo de 0, distribuição de redstone
-crescendo para o fundo, ferro concentrado perto de 0, cobre só no topo da faixa — o perfil da 1.18.
+Saíram do BelowCore na beta.4: a lista de features da 1.18 (cascalho, tufo, ferro, ouro, redstone, diamante,
+lápis, cobre, esmeralda), as alturas, as contagens e as configs `worldgen.deepBlock`, `worldgen.ores`,
+`worldgen.scaleBottomAnchoredCounts` e `worldgen.oreCountMultiplier` agora são do VitaGenesis (categoria `layer`).
+No núcleo ficam só as primitivas de veio (§5).
 
 ## 7. Luz
 
@@ -279,8 +262,8 @@ crescendo para o fundo, ferro concentrado perto de 0, cobre só no topo da faixa
   chunk (abaixo de 0) aplica a regra de `World.computeLightValue` (`max(emissão, vizinho − max(1, opacidade))`, emissor
   opaco deixa a luz entrar) no 3×3, só aumentando valores. Como nenhuma decoração escreve mais no 3×3 depois disso e a
   luz 15 anda no máximo 14 blocos, o resultado é final e independe da ordem; valores que o `World` já calculou (tochas
-  de jogadores) ficam. Acima de 0 nada é tocado. Seções alteradas são reenviadas no mesmo ciclo. Chunks decorados só
-  com os minérios do Bellow (sem gerador) não precisam de luz e não pagam a etapa.
+  de jogadores) ficam. Acima de 0 nada é tocado. Seções alteradas são reenviadas no mesmo ciclo. A camada provisória
+  (sem gerador) não tem fontes de luz e não passa pela etapa.
 * **Bordas no cliente**: a hipótese de que a luz profunda cortada numa borda nunca é refeita porque as flags de borda
   do ArchaicFix (`short`, 16 seções) não cobrem Y < 0 não procede como descrita: no ArchaicFix 0.8.0 essas flags só
   são marcadas para a luz do céu (`relightSkylightColumn`), que é 0 abaixo de Y 0; a luz de bloco não usa flags em
@@ -314,7 +297,7 @@ crescendo para o fundo, ferro concentrado perto de 0, cobre só no topo da faixa
 | ArchaicFix (Phosphor) | Y em 8 bits | `DeepPhosphorEngine` instalado por mundo |
 | Hodgepodge | `MixinChunk` lança erro fatal para TileEntity em Y<0; remove a lista de chunks do cliente | mixin de TE com prioridade 900 resolve antes; instalador de luz tolera lista nula |
 | Angelica | min/max de seção fixos; TEs criadas só para Y≥0 | mixins tardios; TEs profundas criadas na recepção |
-| EFR | deepslate/minérios | integração por reflexão; camada EFR (Y 0..22) continua dele |
+| EFR | variantes deepslate dos minérios; deepslate na troca da bedrock legada | integração por reflexão (hospedeiros e `DeepslateOreRegistry` dos veios); camada EFR (Y 0..22) continua dele |
 | Crucible/Spigot | `activeChunkSet` limpo no fim de `func_147456_g` | ticks aleatórios profundos injetados depois da chamada a `super.func_147456_g()` |
 | Crucible: pistão | o corpo de `canExtend` vai para `canExtend_IntCB` (CraftBukkit devolve o tamanho do empurrão) | variante do mixin escolhida no coremod ao detectar o CraftBukkit |
 | Crucible: `PlayerManager` | `chunkWatcherWithPlayers` vira `ConcurrentLinkedQueue` | fila acessada por `IDeepPlayerManager`, com uma implementação para Forge e outra para Crucible |
@@ -390,10 +373,11 @@ inteira abaixo de 0. Não afeta a proteção dos claims.
 
 ## 10. Testes
 
-* **Unitários** (`./gradlew test`): alturas (qui-quadrado), forma dos veios, contagem esperada, empacotamento da luz,
-  constantes, gradiente da bedrock, alcance vertical dos veios — 21 testes.
+* **Unitários** (`./gradlew test`): forma dos veios, empacotamento da luz, constantes, registro e ordem dos geradores
+  (os testes de alturas, contagens e gradiente da bedrock saíram com o conteúdo, beta.4).
 * **Servidor, 3 fases em JVMs separadas** (`tools/selftest.sh [-Pbellow.compatRun=true]`): cria o mundo com a
-  geração desligada (chunks "legados"), religa e verifica retrogen, terreno, blocos/meta/TileEntity, luz, minérios,
+  geração desligada (chunks "legados"), religa e verifica retrogen, terreno (pelo gerador de teste `TestLayer`, §10.4),
+  blocos/meta/TileEntity, luz,
   física no servidor (um porco fica de pé numa plataforma profunda, um item pousa, areia cai e vira bloco) e portal do
   Nether profundo (acende,
   sobrevive a uma atualização, o `Teleporter` encontra); depois uma JVM nova relê do disco, inclusive o NBT cru do
@@ -488,7 +472,8 @@ inteira abaixo de 0. Não afeta a proteção dos claims.
   fenda de 25 px na junção, injetados num quadro, são reprovados.
   Céu: num poço aberto do piso + 4 até o céu, ao meio-dia, a câmera olha para cima (FOV 30) em Y 100, 40, 10, −10 e
   −40; o centro da imagem tem de ser céu e a borda da abertura não pode ter faixa preta. Sem a correção da caixa do
-  céu, −10 e −40 são reprovados; com ela passa no vanilla e no Angelica.
+  céu, −10 e −40 são reprovados; com ela passa no vanilla e no Angelica. Com o Angelica os quadros abaixo de 0 esperam
+  460 ticks (malhas montadas fora da thread, lentas no GL por software; §10.4).
 
 ### 10.1 Segunda auditoria (inspeção por área)
 
@@ -614,6 +599,73 @@ e Y 300 sem exceção, e o próprio caso do kick (x local 0, Y −9).
 | com a correção | PASS (77 no total): pedra falso, ar verdadeiro, pedra de novo falso, bolsão verdadeiro, ar em x 0 verdadeiro |
 | sem os mixins (controle) | FAIL: `IndexOutOfBoundsException: bitIndex < 0: -139` (o mesmo índice do log de produção) e, antes dele, pedra lida como "soft" (o bit de outro bloco) |
 
+### 10.4 Só o core: o conteúdo sai do BelowCore (beta.4, API 4)
+
+Política nova do ecossistema: o VitaGenesis é o provider da camada negativa e o BelowCore só o core (lista do agente do
+VitaGenesis, `docs/BELOWCORE-HANDOFF.md` dele, conferida no código). Saíram: o preenchimento e o piso de bedrock
+(`DeepTerrain.fill`, gradiente, `PositionalRandom`), a lista de minérios da 1.18 (`DeepFeatures`, `DeepFeature`,
+`HeightProvider`, `Anchor`, `placeFeatures`), a escolha do bloco de preenchimento, as configs `deepBlock`, `ores`,
+`scaleBottomAnchoredCounts` e `oreCountMultiplier`, e na API `getFillBlock`, `getFillMeta`, `isDeepFill`, `isDeepHost`,
+`isBaseStone` (o VitaGenesis não usa nenhum). Ficam as primitivas de veio, os hospedeiros fixos, a troca da bedrock
+legada e todo o resto do core. Decisões além da lista:
+* **Sem gerador**: em vez de recusar a camada (impossível numa dimensão já travada) ou de um preenchimento mínimo
+  definitivo (costura permanente quando o provider volta), a camada provisória fica marcada (`P`) e o chunk continua
+  NONE: nada é vazio ao lado de chunks com camada, e o provider a substitui por retrogen.
+* **Bedrock legada depois dos geradores e só onde Y −1 ficou sólido**: um gerador que falhar não abre um buraco para o
+  vazio (antes ela era trocada antes dos geradores, com o preenchimento garantido pelo Bellow).
+
+Teste: o self-test registra nas fases full e verify um gerador de teste (`TestLayer`: pedra com bedrock no piso, o papel
+do provider) e o `ProvisionalProbe`, que esconde os geradores para o caso sem provider.
+
+| verificação | resultado |
+|---|---|
+| geradores recebem todas as seções, vazias | 634 chamadas de terreno, 0 seções faltando, 0 com blocos |
+| bedrock legada trocada onde Y −1 é sólido, mantida onde ficou aberto | 0 blocos de bedrock legada nas colunas sólidas; a coluna aberta mantém a bedrock em Y 0 |
+| sem gerador: camada provisória, chunk NONE, bedrock legada mantida | pedra sobre bedrock; 9/9 chunks NONE e provisórios; 2304/2304 colunas com bedrock em Y 0; 0 chamadas de gerador |
+| a camada provisória é feita uma vez | túnel cavado nela continua aberto depois de outra carga |
+| (verify, JVM nova, com gerador) o gerador toma a camada provisória | estado TERRAIN, marca limpa, o gerador recebeu retrogen sobre a pedra, 0 bedrock legada restante |
+
+| controle (correção desfeita) | o que reprova |
+|---|---|
+| camada provisória refeita a cada carga | túnel tapado de novo |
+| bedrock legada trocada sem a regra da coluna | a coluna aberta perde a bedrock em Y 0 |
+| fallback marcando o chunk como gerado | 9 chunks fora de NONE; na verify o gerador nunca recebe o chunk e restam 788 blocos de bedrock legada |
+| núcleo preenchendo antes dos geradores (o comportamento antigo) | 36 seções chegam com blocos ao gerador (`bedrock`/`stone` em 0,0,0); a coluna aberta perde a bedrock |
+
+Três achados da validação, nenhum deles defeito do core:
+* **ArchaicFix muda `ExtendedBlockStorage.isEmpty()`**: com a iluminação dele (`MixinExtendedBlockStorage`, estilo
+  Phosphor) a seção só é vazia se também a luz for a padrão. Na sonda de compatibilidade as 36 seções novas do 3×3 em
+  1000,1000 respondiam "não vazia" com 0 blocos (contador de blocos 0, varredura de 4096 posições só com ar). O teste
+  agora varre os blocos (o contrato é "sem blocos"); geradores não devem usar `isEmpty()` para saber se uma seção
+  profunda tem blocos.
+* **Angelica, céu a −40**: com a camada provisória o quadro de 60 ticks mostrava o poço atravessado (seções da parede
+  junto à câmera ainda sem malha: viam-se as seções da superfície atrás) — borda 0,21 preta, igual em 3 execuções.
+  Despejo do cliente no mesmo instante: todas as seções profundas do 5×5 presentes, com os mesmos blocos que 400
+  ticks depois, quando o quadro fica completo (borda 0,02). É latência do Celeritas montando malhas fora da thread
+  no GL por software, não dado faltando. O teste espera 460 ticks antes dos quadros abaixo de 0 com o Angelica. Por
+  que a beta.3 cabia em 60 ticks não foi determinado. Tentativas descartadas: esperar até não haver seção "visível e
+  não montada" (`isSectionVisible`/`isSectionBuilt`) nunca zera (19–32 seções ficam assim indefinidamente);
+  fixar o meio-dia exato põe o sol no centro da imagem e reprova "meio = céu" em qualquer renderer.
+* **Crucible com o modpack inteiro: o chunk que fecha a região já estava carregado.** A sonda "um gerador que falha
+  mantém, salva e envia o que escreveu" carrega 8 vizinhos, esvaziava a fila de estágios e só então carregava o nono,
+  que completa a região do centro. No Crucible algum gerador do pack, ao popular os vizinhos, carregou esse nono chunk
+  antes: a decoração aconteceu dentro do laço e o esvaziamento da fila mandou as seções antes da verificação
+  ("seções enfileiradas 0", reprovado uma vez em duas execuções). O esvaziamento intermediário saiu (a seção do vidro
+  só é enfileirada por essa decoração e nenhum tick roda entre as cargas) e a sonda registra quando a decoração
+  aconteceu antes ("decorated before its region was completed here", visto na execução seguinte, que passou).
+  Controle: sem o `DeepStages.resend` no fim da decoração a sonda reprova ("seções enfileiradas 0"), junto com a de
+  envio no fim do tick.
+
+Validação final (beta.4):
+
+| execução | resultado |
+|---|---|
+| `tools/selftest.sh` (Forge puro) | full 61 PASS, verify 14 PASS |
+| `tools/selftest.sh -Pbellow.compatRun=true` (EndlessIDs, Et Futurum, Hodgepodge, ArchaicFix) | full 61 PASS, verify 14 PASS |
+| `tools/clienttest.sh` vanilla / compat / Angelica | 27 / 28 / 28 PASS, quadros PASS nos três; céu a −40: borda 0,02 / 0,03 / 0,02 |
+| Crucible (cópia de teste, `tools/crucibletest.sh full`) | 73 PASS (com a sonda corrigida; a decoração antecipada apareceu) |
+| self-test do VitaGenesis (a60497d, API 3) contra a beta.4, piso −64 | bootstrap, full e reload PASS |
+
 ## 11. Riscos abertos (beta)
 
 * Crucible: o servidor de produção foi testado (§10), sem jogadores reais conectados; os plugins foram exercitados
@@ -654,7 +706,9 @@ e Y 300 sem exceção, e o próprio caso do kick (x local 0, Y −9).
   determinada (o log foi sobrescrito antes de ser analisado; no ambiente de teste o LuckPerms e o voice chat tentam
   conexões externas que expiram). `tools/crucibletest.sh` agora grava um dump das threads
   (`crucibletest-<fase>-stall.txt`) se o relatório não sair 10 min depois do "Done".
-* Cavernas profundas: fora deste mod, por geradores registrados na API (§5.1; o VitaGenesis é o primeiro).
+* Conteúdo da camada profunda: fora deste mod, por geradores registrados na API (§5.1; o VitaGenesis). Um servidor sem
+  provider fica com a camada provisória (§5) até um ser instalado; com `provisionalLayer = false`, sem camada nos chunks
+  novos.
 * API 3: `onDecorated` passou a rodar depois do tick do mundo. Um gerador que dependia de rodar dentro da carga do
   chunk precisa se adaptar, e self-tests que carregam chunks fora do laço de ticks (no `FMLServerStartedEvent`)
   precisam chamar `BellowAPI.runDeepStages(world)` antes de conferir callbacks ou luz.

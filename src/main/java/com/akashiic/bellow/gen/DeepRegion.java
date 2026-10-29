@@ -18,10 +18,10 @@ import com.akashiic.bellow.storage.DeepDataManager;
 import com.akashiic.bellow.storage.IDeepChunkInternal;
 
 /**
- * 3x3 chunks around the chunk being decorated, for Bellow's ores and for deep generators ({@link IDeepRegion}). Writes
- * go straight into deep sections (no lighting or neighbour updates: base stone and ores are opaque with light 0, so no
- * light value changes). Reads outside the region report a solid, non-target block, so veins never reach unloaded
- * chunks. Every write records its section, so the changed sections are sent once at the end.
+ * 3x3 chunks around the chunk being decorated, handed to the deep generators ({@link IDeepRegion}). Writes go straight
+ * into deep sections (no lighting or neighbour updates: the light stage lights what was placed). For the vein
+ * primitives, reads outside the region report a solid, non-target block, so veins never reach unloaded chunks. Every
+ * write records its section, so the changed sections are sent once after the tick.
  */
 final class DeepRegion implements OreFeature.World, IDeepRegion {
 
@@ -190,7 +190,7 @@ final class DeepRegion implements OreFeature.World, IDeepRegion {
         ExtendedBlockStorage ebs = this.section(c, y);
         if (ebs == null) {
             if (block.getMaterial() == Material.air) return true;
-            // a deep layer that was never filled there (generation was off when the chunk was made)
+            // a section that does not exist (a chunk read back without it, or a slot the generators never wrote)
             int slot = DeepConstants.slot(y >> 4);
             ebs = ((IDeepChunkInternal) c).bellow$getDeepSections()[slot] = new ExtendedBlockStorage(
                 y >> 4 << 4,

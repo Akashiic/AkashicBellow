@@ -26,7 +26,6 @@ import com.akashiic.bellow.api.DeepConstants;
 import com.akashiic.bellow.api.IDeepChunk;
 import com.akashiic.bellow.api.IDeepGenerator;
 import com.akashiic.bellow.api.IDeepRegion;
-import com.akashiic.bellow.gen.DeepBlocks;
 import com.akashiic.bellow.gen.DeepDecorator;
 import com.akashiic.bellow.gen.DeepStages;
 import com.akashiic.bellow.gen.StrictGuard;
@@ -40,10 +39,10 @@ import com.akashiic.bellow.world.LegacyGeneration;
  * follows the priority). Each area below is loaded for one guarantee of {@link IDeepGenerator}; elsewhere the
  * generators only record the calls.
  * <ul>
- * <li>A, chunks 2000..2004 (loaded with a ring: 1999..2005): carving, decoration through {@link IDeepRegion}, ores in
+ * <li>A, chunks 2000..2004 (loaded with a ring: 1999..2005): carving, decoration through {@link IDeepRegion},
  * between, the stages after the tick, the light stage (a glowstone in each chamber; only 2002,2002 has its 5x5
  * decorated);</li>
- * <li>B 2101: ores off; C 2201: loaded inside a legacy population; D 2301: a neighbour of a newer format;</li>
+ * <li>C 2201: loaded inside a legacy population; D 2301: a neighbour of a newer format;</li>
  * <li>E 2401: a failing ore step and a failing generator; G 2501 / H 2510,2501: a chunk loaded from inside a
  * decoration;</li>
  * <li>S 2601: strict mode;</li>
@@ -62,7 +61,6 @@ public final class GeneratorProbe implements IDeepGenerator {
 
     private static final int A0 = 2000, A1 = 2004; // carving area (chunks)
     private static final int AC = 2002; // the one chunk of A whose 5x5 is decorated
-    private static final int B = 2101; // centre chunk of the ores-off area
     private static final int C = 2201; // centre chunk of the area loaded inside a (simulated) legacy population
     private static final int D = 2301; // centre chunk with a neighbour (D + 1, D) of a newer format
     private static final int E = 2401; // centre chunk whose ore step and first generator fail
@@ -78,7 +76,6 @@ public final class GeneratorProbe implements IDeepGenerator {
     private int decorateTwice;
     private int decoratedBeforeNeighbourTerrain;
     private int chamberFilledBeforeDecorate;
-    private int decoratedBeforeOres;
     private final List<int[]> regionChests = new ArrayList<>();
     private int writeOk, writeRefused, writeWrong;
     private int chestsMissing;
@@ -182,9 +179,8 @@ public final class GeneratorProbe implements IDeepGenerator {
             this.strictDecorate[2] = w.setBlock(bx + 40, minY + 45, bz + 3, Blocks.glass, 0, 2); // outside: refused
         }
         if (!inArea(cx, cz)) return;
-        // Bellow's ores already ran (1.18 order) and left the chamber alone (veins never replace air)
+        // the terrain step's carving is intact when decoration starts
         if (countSolid(region, bx, bz, minY) != 0) this.chamberFilledBeforeDecorate++;
-        if (GenConfig.ores && countPlaced(region.world(), cx, cz, minY) == 0) this.decoratedBeforeOres++;
 
         // a chest in each of the 9 chunks, so also in the one whose load completed this region (its tile entities are
         // registered by the end of its onChunkLoad): one position per (chunk, centre) pair, away from the chambers
@@ -294,7 +290,7 @@ public final class GeneratorProbe implements IDeepGenerator {
         List<String> recorded = DeepWorlds.recordedGenerators(world);
         check.check(
             "generators of the dimension recorded in akashicbellow.dat",
-            Arrays.asList(ID + "@" + VERSION, ID2)
+            Arrays.asList(TestLayer.ID, ID + "@" + VERSION, ID2)
                 .equals(recorded),
             "" + recorded);
         DeepStages.drain(world); // what earlier checks queued
@@ -330,11 +326,9 @@ public final class GeneratorProbe implements IDeepGenerator {
                 + ", nested "
                 + p.nested);
         check.check(
-            "ores run between the generator steps and leave carved space alone",
-            p.chamberFilledBeforeDecorate == 0 && p.decoratedBeforeOres == 0,
-            p.chamberFilledBeforeDecorate + " chambers with blocks when decoration started, "
-                + p.decoratedBeforeOres
-                + " chunks without ores yet");
+            "carved space intact when decoration starts",
+            p.chamberFilledBeforeDecorate == 0,
+            p.chamberFilledBeforeDecorate + " chambers with blocks when decoration started");
         check.check(
             "generators run by priority on each chunk",
             SECOND.order.equals(Collections.singletonList("after")),
@@ -360,8 +354,8 @@ public final class GeneratorProbe implements IDeepGenerator {
                 + early);
         DeepStages.drain(world);
 
-        // after the whole area is decorated: chamber still open, ores around it, markers in place
-        int solid = 0, ores = 0, obsidian = 0, chests = 0, glowstone = 0;
+        // after the whole area is decorated: chamber still open, markers in place
+        int solid = 0, obsidian = 0, chests = 0, glowstone = 0;
         for (int cx = A0; cx <= A1; cx++) for (int cz = A0; cz <= A1; cz++) {
             int bx = cx << 4, bz = cz << 4;
             for (int y = minY + CHAMBER; y < minY + CHAMBER + 8; y++)
@@ -372,7 +366,6 @@ public final class GeneratorProbe implements IDeepGenerator {
                     else if (b == Blocks.glowstone) glowstone++;
                     else if (b != Blocks.air) solid++;
                 }
-            ores += countPlaced(world, cx, cz, minY);
         }
         check.check(
             "carved chamber stays open in the world",
@@ -385,10 +378,6 @@ public final class GeneratorProbe implements IDeepGenerator {
                 + " chests, "
                 + glowstone
                 + " glowstone");
-        check.check(
-            "ores still placed around carved space",
-            !GenConfig.ores || ores > 0,
-            ores + " ore/tuff/gravel blocks in the 25 chunks (ores " + GenConfig.ores + ")");
         check.check(
             "IDeepRegion writes",
             p.writeWrong == 0 && p.writeOk == 75 && p.writeRefused == 75 && p.chestsMissing == 0,
@@ -443,14 +432,13 @@ public final class GeneratorProbe implements IDeepGenerator {
             p.retrogenMismatches == 0,
             p.retrogenCalls + " retrogen calls, " + p.retrogenMismatches + " mismatches");
 
-        oresOff(world, minY, check, p);
         legacyPhase(world, minY, check, p);
         newerNeighbour(world, minY, check, p);
         failures(world, minY, check);
         nestedLoad(world, check, p);
         strict(world, minY, check, p);
 
-        BellowAPI.resendDeepSections(world, world.getChunkFromChunkCoords(B, B), DeepConstants.slotBit(-1));
+        BellowAPI.resendDeepSections(world, world.getChunkFromChunkCoords(C, C), DeepConstants.slotBit(-1));
         check.check("resendDeepSections with no player watching", true, "");
     }
 
@@ -540,25 +528,6 @@ public final class GeneratorProbe implements IDeepGenerator {
                 + BellowAPI.getGeneratorData(ac, ID));
     }
 
-    private static void oresOff(WorldServer world, int minY, BukkitProbe.Check check, GeneratorProbe p) {
-        // ores off: a registered generator alone still brings chunks to the decorated state
-        boolean oresOn = GenConfig.ores;
-        GenConfig.ores = false;
-        try {
-            for (int cx = B - 1; cx <= B + 1; cx++) for (int cz = B - 1; cz <= B + 1; cz++) load(world, cx, cz);
-        } finally {
-            GenConfig.ores = oresOn;
-        }
-        Chunk b = world.getChunkFromChunkCoords(B, B);
-        int placed = countPlaced(world, B, B, minY);
-        check.check(
-            "with ores off, generators still get the decoration step",
-            ((IDeepChunk) b).bellow$getGenState() == DeepConstants.GEN_DECORATED && p.decorated.contains(key(B, B))
-                && placed == 0,
-            "state " + ((IDeepChunk) b).bellow$getGenState() + ", " + placed + " ore blocks");
-        DeepStages.drain(world);
-    }
-
     private static void legacyPhase(WorldServer world, int minY, BukkitProbe.Check check, GeneratorProbe p) {
         // inside another chunk's population World writes below 0 are refused to the 1.7.10 generators; the generator
         // callbacks still get to use the World (they leave that phase)
@@ -603,44 +572,39 @@ public final class GeneratorProbe implements IDeepGenerator {
     }
 
     private static void failures(WorldServer world, int minY, BukkitProbe.Check check) {
-        // E: the ore step throws after placing its veins, then the first generator throws after writing into a
-        // neighbour; the second generator still runs, and everything written is saved and sent
+        // E: the first generator throws after writing into a neighbour; the second generator still runs, and what was
+        // written is saved and sent
         for (int cx = E - 1; cx <= E + 1; cx++) for (int cz = E - 1; cz <= E + 1; cz++) {
             if (cx != E || cz != E + 1) load(world, cx, cz);
         }
-        DeepStages.drain(world);
-        DeepDecorator.failOresForTests = true;
-        try {
-            load(world, E, E + 1); // completes E's region
-        } finally {
-            DeepDecorator.failOresForTests = false;
-        }
+        // no drain here: a mod generator populating these chunks may load E, E + 1 itself, decorating E already, and a
+        // drain would send the queued sections before they are checked (the glass section is queued by this decoration
+        // only, and no tick runs between these loads)
+        boolean early = BellowAPI.isDecorated(world.getChunkFromChunkCoords(E, E));
+        load(world, E, E + 1); // completes E's region
         Chunk centre = world.getChunkFromChunkCoords(E, E);
         Chunk neighbour = world.getChunkFromChunkCoords(E, E + 1);
         int glassBit = DeepConstants.slotBit((minY + 40) >> 4);
         int sent = DeepStages.pendingResend(world, neighbour);
-        int centreSent = DeepStages.pendingResend(world, centre);
         boolean glass = world.getBlock((E << 4) + 3, minY + 40, (E << 4) + 17) == Blocks.glass;
         int stages = BellowAPI.getGeneratorStages(centre, ID);
         check.check(
-            "a failing ore step or generator keeps, saves and sends what was written",
+            "a failing generator keeps, saves and sends what was written",
             BellowAPI.isDecorated(centre) && glass
                 && (sent & glassBit) != 0
-                && (!GenConfig.ores || centreSent != 0)
                 && neighbour.isModified
                 && SECOND.decorated.contains(key(E, E))
                 && (stages & DeepConstants.STAGE_DECORATE) != 0,
             "glass " + glass
                 + ", neighbour sections queued "
                 + Integer.toBinaryString(sent)
-                + ", centre "
-                + Integer.toBinaryString(centreSent)
                 + ", neighbour modified "
                 + neighbour.isModified
                 + ", second generator ran "
                 + SECOND.decorated.contains(key(E, E))
                 + ", stages "
-                + stages);
+                + stages
+                + (early ? ", decorated before its region was completed here" : ""));
         DeepStages.drain(world);
     }
 
@@ -720,7 +684,7 @@ public final class GeneratorProbe implements IDeepGenerator {
         List<String> recorded = DeepWorlds.recordedGenerators(world);
         check.check(
             "a changed generator list is recorded (and logged)",
-            Collections.singletonList(ID2)
+            Arrays.asList(TestLayer.ID, ID2)
                 .equals(recorded),
             "" + recorded);
 
@@ -757,13 +721,13 @@ public final class GeneratorProbe implements IDeepGenerator {
             .loadChunk(cx, cz);
     }
 
-    /** Blocks other than the base fill, bedrock and air below 0 (ores, tuff, gravel, generator markers). */
+    /** Blocks other than the test layer's stone, bedrock and air below 0 (what a decoration placed). */
     private static int countPlaced(WorldServer world, int cx, int cz, int minY) {
         int n = 0;
         Chunk c = world.getChunkFromChunkCoords(cx, cz);
         for (int y = minY; y < 0; y++) for (int x = 0; x < 16; x++) for (int z = 0; z < 16; z++) {
             Block b = c.getBlock(x, y, z);
-            if (b.getMaterial() == Material.air || b == Blocks.bedrock || b == DeepBlocks.fill) continue;
+            if (b.getMaterial() == Material.air || b == Blocks.bedrock || b == Blocks.stone) continue;
             if (b == Blocks.obsidian || b == Blocks.chest || b == Blocks.glass || b == Blocks.glowstone) continue;
             n++;
         }

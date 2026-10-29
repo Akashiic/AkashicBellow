@@ -19,6 +19,14 @@ public interface IDeepChunkInternal {
 
     void bellow$setFromDisk(boolean fromDisk);
 
+    /**
+     * The deep layer is the core's provisional one (stone over bedrock, made while no generator applied): the chunk is
+     * still not generated, and the first generator to see it receives it as a retrogen chunk.
+     */
+    boolean bellow$isProvisional();
+
+    void bellow$setProvisional(boolean provisional);
+
     /** The chunk still waits for the light stage (it was decorated with deep generators present). */
     boolean bellow$isLightPending();
 

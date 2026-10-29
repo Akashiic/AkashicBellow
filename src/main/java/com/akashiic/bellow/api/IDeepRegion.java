@@ -64,9 +64,9 @@ public interface IDeepRegion {
     TileEntity getTileEntity(int x, int y, int z);
 
     /**
-     * A 1.18 ore vein ({@code OreFeature}) like Bellow's own: replaces stone with {@code ore} and the deep hosts
-     * (deepslate, tuff; {@link BellowAPI#isDeepHost}) with its deepslate variant from Et Futurum's registry (or
-     * {@code ore} itself). Each block touching air is skipped with probability {@code discardOnAir}; air is never
+     * A 1.18 ore vein ({@code OreFeature}): replaces stone with {@code ore}, and Et Futurum's deepslate and tuff with
+     * the ore's deepslate variant from Et Futurum's {@code DeepslateOreRegistry} (or {@code ore} itself). Other blocks
+     * are not hosts. Each block touching air is skipped with probability {@code discardOnAir}; air is never
      * replaced. Blocks outside the region, outside {@code minY..-1} or in a read-only chunk are clipped.
      *
      * @param size 0..64, the 1.18 vein size
@@ -77,8 +77,8 @@ public interface IDeepRegion {
     int placeOre(Random random, int x, int y, int z, int size, float discardOnAir, Block ore, int meta);
 
     /**
-     * A 1.18 blob (the same vein shape, as {@code ore_clay}, {@code ore_tuff} or {@code ore_gravel}): replaces every
-     * base stone ({@link BellowAPI#isBaseStone}) with {@code block}. Same rules as {@link #placeOre}.
+     * A 1.18 blob (the same vein shape, as {@code ore_clay}, {@code ore_tuff} or {@code ore_gravel}): replaces stone,
+     * Et Futurum's deepslate and tuff with {@code block}. Same rules as {@link #placeOre}.
      *
      * @since API 3
      */

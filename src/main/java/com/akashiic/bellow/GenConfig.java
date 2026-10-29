@@ -5,17 +5,19 @@ import com.gtnewhorizon.gtnhlib.config.Config;
 @Config(modid = AkashicBellow.MODID, category = "worldgen")
 public class GenConfig {
 
-    @Config.Comment("Generate the deep layer in chunks. Disable only for debugging: chunks stay void below Y 0.")
+    @Config.Comment({ "Run the deep generation stages (the registered generators, the light stage). Disable only for",
+        "debugging: new chunks then get no deep layer." })
     @Config.DefaultBoolean(true)
     public static boolean enabled;
 
-    @Config.Comment("Also fill chunks that were saved before the mod was installed (retrogen).")
+    @Config.Comment("Also hand chunks saved before they had a deep layer to the generators (retrogen).")
     @Config.DefaultBoolean(true)
     public static boolean retrogen;
 
     @Config.Comment({
-        "Replace natural bedrock at Y 0..legacyBedrockMaxY with the deep block so the old floor opens into",
-        "the new layer (what 1.18 did when upgrading worlds). Only Blocks.bedrock is touched." })
+        "Replace natural bedrock at Y 0..legacyBedrockMaxY with deepslate (Et Futurum) or stone so the old floor",
+        "opens into the new layer (what 1.18 did when upgrading worlds), after the generators made it and only where",
+        "they left Y -1 solid. Only Blocks.bedrock is touched." })
     @Config.DefaultBoolean(true)
     public static boolean replaceLegacyBedrock;
 
@@ -23,24 +25,12 @@ public class GenConfig {
     @Config.RangeInt(min = 0, max = 8)
     public static int legacyBedrockMaxY;
 
-    @Config.Comment({ "Block that fills the deep layer, as modid:name[:meta].",
-        "'auto' = etfuturum:deepslate when Et Futurum Requiem provides it, otherwise minecraft:stone." })
-    @Config.DefaultString("auto")
-    public static String deepBlock;
-
-    @Config.Comment("Generate 1.18-style ores, tuff and gravel below Y 0.")
+    @Config.Comment({ "Dimensions with a deep layer but no deep generator (none installed, or none that applies):",
+        "give new chunks a provisional layer of stone over a bedrock floor (no ores, no caves), so nothing below 0",
+        "is void next to chunks that have a deep layer. Those chunks keep their natural bedrock at Y 0 and count as",
+        "not generated: a generator installed later replaces the provisional layer. Off: they get no deep layer." })
     @Config.DefaultBoolean(true)
-    public static boolean ores;
-
-    @Config.Comment({ "For floors other than -64: scale the count of features whose range starts at the bottom",
-        "of the world so that ore density per block stays equal to 1.18." })
-    @Config.DefaultBoolean(true)
-    public static boolean scaleBottomAnchoredCounts;
-
-    @Config.Comment("Global multiplier applied to every deep ore count (expected value; fractional counts are stochastic).")
-    @Config.DefaultDouble(1.0)
-    @Config.RangeDouble(min = 0.0, max = 16.0)
-    public static double oreCountMultiplier;
+    public static boolean provisionalLayer;
 
     @Config.Comment({ "Time per world tick for the deep stages that run after the world tick: the light of what deep",
         "generators placed and their onDecorated/onLit callbacks. What does not fit waits for the next tick." })

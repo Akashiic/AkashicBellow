@@ -251,7 +251,7 @@ public final class ClientSelfTest {
             this.camYaw = 0.0F;
         }
         mc.thePlayer.motionX = mc.thePlayer.motionY = mc.thePlayer.motionZ = 0;
-        if (++this.timer > (this.skyIndex == 0 ? 200 : 60)) {
+        if (++this.timer > this.skyWait()) {
             this.shot(mc, "bellow-sky-" + SKY_HEIGHTS[this.skyIndex]);
             this.timer = 0;
             if (++this.skyIndex >= SKY_HEIGHTS.length) {
@@ -313,6 +313,16 @@ public final class ClientSelfTest {
             dark && own == 14,
             "dark before " + dark + ", block light next to a client-only glowstone at Y " + oy + ": " + own);
         this.finish(mc);
+    }
+
+    /**
+     * Ticks before each screenshot. Angelica meshes sections off thread, slowly under software GL: at Y -40 the wall
+     * sections next to the camera were still unbuilt (drawn as nothing) after 60 ticks and built after 460, with the
+     * same blocks on the client both times (docs/DESIGN.md, section 10.4).
+     */
+    private int skyWait() {
+        if (this.skyIndex == 0) return 200;
+        return com.akashiic.bellow.core.Compat.angelica && SKY_HEIGHTS[this.skyIndex] < 0 ? 460 : 60;
     }
 
     /** 25 x 25 pit, open from just above the floor to the sky, far from where the client has been. */

@@ -36,6 +36,11 @@ public class BellowLateMixins implements ILateMixinLoader {
             mixins.add("ic2.MixinTileEntityMagnetizer_Deep");
         }
         if (loadedMods.contains("GalacticraftCore")) mixins.add("galacticraft.MixinEntitySpaceshipBase_Deep");
+        // BuildCraft's block property cache indexes a BitSet by Y: a block change below 0 threw (player kicked)
+        if (loadedMods.contains("BuildCraft|Core")) {
+            mixins.add("buildcraft.MixinChunkProperty_Deep");
+            mixins.add("buildcraft.MixinDimensionProperty_Deep");
+        }
         return mixins;
     }
 }

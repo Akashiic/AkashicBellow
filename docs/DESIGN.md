@@ -321,12 +321,18 @@ crescendo para o fundo, ferro concentrado perto de 0, cobre só no topo da faixa
 | Crucible: CraftBukkit | `CraftWorld.getBlockAt`, `CraftChunk.getBlock` e `CraftBlock` fazem `y & 0xFF`: Y −10 virava 246 para todo plugin e todo evento Bukkit | abaixo de 0 a máscara vira −1 (`y & −1 == y`); 0..255 inalterado |
 | IC2 2.2.828 | Minerador para em Y 0 (5 comparações com 0); Magnetizador para em Y > 0 | mixins tardios: limites trocados pelo piso do mundo |
 | Galacticraft 4.0 | foguetes (`EntitySpaceshipBase`) são destruídos no servidor se `posY < 0` | mixin tardio: só abaixo do piso |
+| BuildCraft 7.1.63 | o cache de propriedades de bloco (`DimensionProperty`/`ChunkProperty`: "soft", minério, madeira…, usado por robôs, builders, fillers) guarda um bit em `x·4096 + y·16 + z` (x e z locais). Abaixo de 0, com x local 0 o índice é negativo: visto em produção em 2026-10-28, quebrar um bloco ali num chunk coberto pelo cache lançou `IndexOutOfBoundsException` em `World.markBlockForUpdate` e o jogador foi desconectado ("Internal server error"). Com x local > 0 não lança, mas lê e grava o bit de outro bloco (a coluna x − 1, 256 acima): respostas erradas em silêncio | mixins tardios: o cache cobre do piso ao topo (com piso 0 o layout é o do BuildCraft) e o preenchimento do cache começa no piso; fora da faixa lê falso e não grava |
 | Crucible: colisão | o Spigot reescreve `getCollidingBoundingBoxes` e começa o Y em `max(k - 1, 0)`: nada colidia abaixo de 0 no servidor. Medido sem a correção: um porco cai da plataforma em Y −39 até Y −134 (itens disfarçam, porque são empurrados para fora de blocos) | mixin só no Crucible: teste e limite usam o piso |
 | Crucible: blocos que caem | o CraftBukkit exige `j > 0` para o pouso: areia e cascalho viravam item abaixo de 0 (lido no bytecode do jar de produção) | mixin só no Crucible: `j > piso` |
 | Forge: TEs ao enviar chunks | `func_147486_a(x, 0, z, …, 256, …)` coleta os pacotes de descrição só de Y ≥ 0 (placas, spawners, máquinas profundas ficavam no estado padrão no cliente); o envio rápido do Hodgepodge faz a mesma chamada | no próprio `func_147486_a`: pedido da coluna inteira (0 até o topo) começa no piso; o Crucible já percorre o mapa de TEs do chunk |
 | Vanilla: portais | o `BlockPortal$Size` só desce `while (y > 0)` e o `Teleporter` procura e cria portais de cima até Y 0 | piso nos dois (variante do `Teleporter` para o Crucible, que move as buscas para `findPortal`/`createPortal`) |
 | Vanilla/Forge: outros | Enderman só teleporta com `j > 0`; fluidos finitos do Forge somem em `y < 0`; entidades abaixo de 0 saíam e voltavam para o chunk a cada tick (`EnteringChunk` a cada tick) | piso nos testes; linha de entidade limitada a 0 como no `Chunk.addEntity` |
 | Cliente vanilla (sem Angelica) | o `RenderGlobal` reserva listas/queries para 16 seções de altura; a grade mais alta estourava em distâncias de renderização altas | reserva para 16 + 32 seções |
+
+Ouvintes de bloco (`IWorldAccess`) do pack, varridos depois do caso do BuildCraft: Armourer's Workshop, AE2, CoroUtil
+(vazios), DragonAPI (repassa um evento), OpenComputers, Et Futurum (passa por `blockExists`, que conhece o piso),
+JourneyMap (só chunk), Immersive Petroleum (coordenada fixa) e o sampler do spark (empacota a posição num `long`):
+nenhum outro indexa um array por Y.
 
 Os limites de IC2/GC foram encontrados por varredura de bytecode (comparações de `yCoord`/`posY` com 0 e acessos
 diretos a `getBlockStorageArray`) e confirmados pela sonda de compatibilidade (§10), que os reprova sem os patches.
@@ -590,6 +596,23 @@ a DECORATED, sem minérios; um callback chamado depois de uma carga dentro de um
 pelo `World` abaixo de 0. Controles daquela rodada: sem a chamada de `generateTerrain` (49/49 chunks sem terreno,
 câmaras cheias); com o bug antigo de `ores = false` (chunk parado em TERRAIN); gerador antes dos minérios (15 de 25
 chunks decorados sem minério ainda); sem suspender a fase legada (escrita recusada).
+
+### 10.3 BuildCraft abaixo de 0 (kick em produção, 2026-10-28)
+
+Sintoma: jogador desconectado com "Internal server error" ao quebrar um bloco abaixo de 0, depois de abrir um poço com
+`//cyl`. Causa (log do servidor): `IndexOutOfBoundsException: bitIndex < 0: -139` em
+`buildcraft.core.properties.ChunkProperty.set`, chamado por `World.markBlockForUpdate` (§9). Varredura dos outros
+ouvintes `IWorldAccess` do pack: nenhum outro indexa por Y.
+
+Teste (`BuildCraftProbe`, fase full, só quando o BuildCraft está instalado: cópia do Crucible de produção), pela API do
+BuildCraft (`getWorldProperty("soft")`): pedra e ar em Y −20 depois de o cache existir (troca notificada por
+`World.markBlockForUpdate`, o frame do kick), bolsão de ar feito antes do cache (laço de preenchimento), Y 250, piso − 5
+e Y 300 sem exceção, e o próprio caso do kick (x local 0, Y −9).
+
+| rodada | resultado |
+|---|---|
+| com a correção | PASS (77 no total): pedra falso, ar verdadeiro, pedra de novo falso, bolsão verdadeiro, ar em x 0 verdadeiro |
+| sem os mixins (controle) | FAIL: `IndexOutOfBoundsException: bitIndex < 0: -139` (o mesmo índice do log de produção) e, antes dele, pedra lida como "soft" (o bit de outro bloco) |
 
 ## 11. Riscos abertos (beta)
 

@@ -666,6 +666,29 @@ Validação final (beta.4):
 | Crucible (cópia de teste, `tools/crucibletest.sh full`) | 73 PASS (com a sonda corrigida; a decoração antecipada apareceu) |
 | self-test do VitaGenesis (a60497d, API 3) contra a beta.4, piso −64 | bootstrap, full e reload PASS |
 
+### 10.5 Sair da água abaixo de 0 (relato de jogador, 2026-10-29)
+
+Relato: numa corrente de água abaixo de 0, segurando espaço contra a borda, o jogador não sai da água; acima de 0
+sai. Causa no vanilla: `World.isAnyLiquid` e `World.checkBlockCollision` fazem `if (box.minY < 0.0D) --minY`, como se
+`floor` arredondasse para zero (não arredonda). Abaixo de 0 elas examinam também o bloco sob a caixa. Para sair da
+água o vanilla testa `isOffsetPositionInLiquid` com a caixa erguida 0,6 (`EntityLivingBase.moveEntityWithHeading`),
+que abaixo de 0 achava a água de baixo e nunca deixava subir na borda. Correção: a condição de Y das duas é falsa
+(`MixinWorld_Deep`, `require = 2`); X e Z ficam como no vanilla. Acima de 0 a condição nunca era verdadeira, então
+nada muda lá. A correção vale para o cliente, que move o próprio jogador. `checkBlockCollision` só pesa no teste de
+voo do servidor (ficava mais tolerante abaixo de 0).
+
+Teste (`WaterProbe`, fase full): um `FakePlayer` numa piscina de 2 blocos com borda 1 bloco acima da água anda contra
+a borda com pulo segurado, executando o movimento vanilla tick a tick, em Y 100 (controle) e em piso + 30.
+
+| execução | Y 100 | Y −34 |
+|---|---|---|
+| sem a correção | na borda em 35 ticks (x 3,06, y 102,30) | ainda na piscina após 200 ticks (y −32,72) |
+| com a correção | na borda em 35 ticks (x 3,06, y 102,30) | na borda em 35 ticks (x 3,06, y −31,70) |
+
+Com a correção: Forge puro 63 PASS e com o pacote de compatibilidade 63 PASS (as duas sondas iguais às da tabela);
+clientes vanilla e Angelica PASS (a mixin aplica no cliente: com `require = 2` o jogo não abriria sem ela); Crucible
+(cópia de teste) 75 PASS, com as duas sondas como acima. O nado em si não é exercitado no cliente headless.
+
 ## 11. Riscos abertos (beta)
 
 * Crucible: o servidor de produção foi testado (§10), sem jogadores reais conectados; os plugins foram exercitados

@@ -109,6 +109,21 @@ public abstract class MixinWorld_Deep implements IDeepWorld, IDeepWorldInternal 
         return maxY >= this.bellow$getMinY();
     }
 
+    // isAnyLiquid and checkBlockCollision: if (box.minY < 0.0D) --minY. Meant for coordinates floor() rounds toward
+    // zero (it does not), it also scans the block under any box below 0: a swimming player pressed against a ledge
+    // never left the water there (isOffsetPositionInLiquid found the water under its raised box).
+    @Definition(id = "minY", field = "Lnet/minecraft/util/AxisAlignedBB;minY:D")
+    @Expression("?.minY < 0.0")
+    @ModifyExpressionValue(
+        method = { "isAnyLiquid(Lnet/minecraft/util/AxisAlignedBB;)Z",
+            "checkBlockCollision(Lnet/minecraft/util/AxisAlignedBB;)Z" },
+        at = @At("MIXINEXTRAS:EXPRESSION"),
+        require = 2,
+        allow = 2)
+    private boolean bellow$noExtraBlockBelow(boolean original) {
+        return false;
+    }
+
     // -------------------------------------------------------------- y < 0 (and, in strict mode, generator contract)
 
     /** Deep data of a newer format is read-only in this session: a write there would be dropped on save. */
